@@ -1,143 +1,86 @@
-# 📊 Portfolio Backtester / 投资组合回测器
+# 📊 投资组合回测器 v5
 
-[English](#english) | [中文](#中文)
+> 本地运行的 Streamlit 应用，支持全球 160+ 资产的智能选择、多资产基准对比、对冲分析和压力测试。
 
----
+## ✨ 功能特色
 
-<a name="english"></a>
-## English
+- 🌍 **全球资产库**：A股/港股/美股/欧洲/日本/加密货币/大宗商品/外汇，支持浏览和搜索
+- 📊 **多资产基准**：支持多资产加权基准组合（如 60% 沪深300 + 40% 长期国债）
+- ⚡ **压力测试**：2008金融危机、2020-COVID、2022熊市等 9 个预设事件
+- 📈 **完整分析**：权益曲线、回撤、月度热力图、年度收益、绩效指标
+- 🛡️ **对冲对比**：可添加对冲资产（如黄金），对比对冲前后效果
+- 📥 **HTML报告**：一键下载完整交互式 HTML 报告
+- 🔄 **自动再平衡**：支持无/每月/每季度再平衡
+- 💾 **数据缓存**：自动缓存到 data/ 目录，避免重复下载
+- 🎨 **智能选资产**：浏览模式（市场→类型→标的三级）+ 搜索模式（模糊搜索）
 
-An interactive portfolio backtesting web application built with **Streamlit**. Supports multi-market, multi-asset portfolio analysis with advanced risk metrics, stress testing, and hedge analysis.
+## 🚀 快速开始
 
-### Features
-
-- **160+ Assets**: Full coverage of A-shares, Hong Kong, US stocks, Japan, Europe — ETFs, indices, and individual stocks
-- **Unified Asset Selector**: Searchable dropdown with labels formatted as `Market · Type | Name (Ticker)`
-- **Portfolio Backtesting**: Weighted return calculation with monthly/quarterly rebalancing
-- **Performance Metrics**: Annualized return, Sharpe, Sortino, Max Drawdown, Calmar, Win Rate, Profit/Loss ratio
-- **Interactive Charts**: Equity curve, drawdown analysis, annual returns, monthly heatmap (Plotly)
-- **Stress Testing**: Pre-defined historical events (COVID crash, 2022 bear market, financial crises) with return/drawdown comparison
-- **Hedge Analysis**: Optionally add a hedge asset and compare hedged vs. unhedged portfolio performance
-- **Report Export**: One-click download of a complete HTML report with all charts and metrics
-
-### Data Source
-
-- **AKShare** (free, no API key required)
-- **yfinance** (fallback for international indices — Europe, Japan, etc.)
-- Automatic data caching in the `data/` folder
-
-### Supported Markets
-
-| Market | Coverage |
-|--------|----------|
-| 🇨🇳 A-Shares | CSI 300, SSE 50, CSI 500 indices; 60+ ETFs (broad, sector, commodity, bond, cross-border, QDII, currency, leveraged); 60+ individual stocks |
-| 🇭🇰 Hong Kong | Tencent, Alibaba, Meituan, Xiaomi, BYD, JD, etc. |
-| 🇺🇸 US Stocks | S&P 500 (SPY), Nasdaq 100 (QQQ), Dow Jones; AAPL, MSFT, NVDA, TSLA, etc.; GLD, SLV, TLT, etc. |
-| 🇯🇵 Japan | Nikkei 225, TOPIX; domestic Japan ETFs |
-| 🇪🇺 Europe | DAX, FTSE 100, CAC 40, Euro Stoxx 50; domestic Europe ETFs |
-
-### Installation & Running
+### 1. 安装依赖
 
 ```bash
 cd backtest_app
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Launch the app
-streamlit run app.py
 ```
 
-The browser will automatically open at http://localhost:8501
-
-### Usage
-
-1. **Configure Assets**: Use the searchable dropdown to select assets, set weights (%) for each
-2. **Adjust Settings** (⚙️ tab): Start date, rebalancing frequency, benchmark index, stress test events, hedge asset
-3. **Run Backtest**: Click 🚀 Run Backtest
-4. **Analyze Results**: View equity curves, drawdowns, annual/monthly returns, stress test comparisons
-5. **Export**: Download the full HTML report
-
-### Project Structure
-
-```
-backtest_app/
-├── app.py           # Streamlit main application
-├── utils.py         # Data download, calculation, and chart utilities
-├── requirements.txt # Python dependencies
-├── data/            # Data cache directory (auto-created)
-└── README.md
-```
-
----
-
-<a name="中文"></a>
-## 中文
-
-基于 Streamlit 的交互式投资组合回测应用，支持多市场、多资产回测分析。
-
-### 功能
-
-- **160+ 资产**：覆盖 A股/港股/美股/日本/欧洲，含 ETF、指数、个股
-- **统一资产选择器**：搜索式下拉框，格式 `市场 · 类型 | 名称 (代码)`
-- **组合回测**：加权收益计算，支持月度/季度再平衡
-- **绩效指标**：年化回报、Sharpe、Sortino、Max Drawdown、Calmar、胜率、盈亏比
-- **交互式图表**：权益曲线、回撤分析、年度收益对比、月度热力图（Plotly）
-- **压力测试**：预定义历史事件（COVID、熊市、金融危机等）回报/回撤对比
-- **对冲分析**：可选添加对冲资产，对比含对冲组合表现
-- **报告导出**：一键下载完整 HTML 报告
-
-### 数据源
-
-- **AKShare**（免费，无需 API Key）
-- **yfinance**（回退方案，支持欧洲/日本等国际指数）
-- 数据自动缓存到 `data/` 文件夹
-
-### 支持的市场
-
-| 市场 | 覆盖范围 |
-|------|---------|
-| 🇨🇳 A股 | 沪深300、上证50、中证500 等指数；60+ ETF（宽基/行业/商品/债券/跨境/QDII/货币/杠杆）；60+ 个股 |
-| 🇭🇰 港股 | 腾讯、阿里、美团、小米、比亚迪、京东等 |
-| 🇺🇸 美股 | 标普500(SPY)、纳指100(QQQ)、道指；AAPL、MSFT、NVDA、TSLA 等个股；GLD、TLT 等 ETF |
-| 🇯🇵 日本 | 日经225、东证指数；日经ETF(国内) |
-| 🇪🇺 欧洲 | 德国DAX、英国富时100、法国CAC40、欧洲斯托克50；德国ETF(国内) |
-
-### 安装与运行
+### 2. 运行
 
 ```bash
-cd backtest_app
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 启动应用
 streamlit run app.py
 ```
 
-浏览器会自动打开 http://localhost:8501
+浏览器会自动打开 `http://localhost:8501`
 
-### 使用方法
-
-1. **配置资产**：使用搜索式下拉框选择资产，设置权重(%)
-2. **调整参数**（⚙️ 设置标签页）：起始日期、再平衡频率、基准指数、压力测试事件、对冲资产
-3. **运行回测**：点击 🚀 运行回测
-4. **分析结果**：查看权益曲线、回撤、年度/月度收益、压力测试对比
-5. **导出报告**：下载 HTML 完整报告
-
-### 文件结构
+## 📁 项目结构
 
 ```
 backtest_app/
-├── app.py           # Streamlit 主应用
-├── utils.py         # 数据下载、计算、图表工具函数
-├── requirements.txt # Python 依赖
-├── data/            # 数据缓存目录（自动创建）
-└── README.md
+├── app.py              # Streamlit 主应用
+├── utils.py            # 工具函数（资产目录、下载、计算、图表）
+├── requirements.txt    # Python 依赖
+├── README.md           # 说明文档
+├── .gitignore          # 忽略 data/ 和缓存
+└── data/               # 数据缓存目录（自动创建）
 ```
 
----
+## 🌍 支持的资产（160+）
 
-## License
+| 市场 | 资产类型 | 数量 |
+|------|---------|------|
+| 🇨🇳 A股 | 指数、ETF（宽基/跨境/商品/债券/行业）、个股 | 70+ |
+| 🇭🇰 港股 | 指数、个股 | 16+ |
+| 🇺🇸 美股 | 指数、科技巨头、金融医药、ETF（宽基/行业/商品/债券/另类） | 60+ |
+| 🇯🇵 日本 | 指数、ETF | 4 |
+| 🇪🇺 欧洲 | 指数、ETF | 7 |
+| 🌏 其他 | 印度、巴西、澳洲、韩国、台湾 | 5 |
+| ₿ 加密货币 | BTC、ETH、SOL 等 | 6 |
+| 💱 外汇 | EUR/USD、USD/JPY 等 | 6 |
+| 🛢️ 大宗商品 | 原油、黄金、白银、铜、天然气期货 | 6 |
 
-MIT License — For educational and research purposes only. Not financial advice.
+## ⚡ 压力测试事件
+
+| 事件 | 时间范围 | 说明 |
+|------|---------|------|
+| 2008-金融危机 | 2007.10 - 2009.03 | 次贷危机 |
+| 2010-欧债危机 | 2010.04 - 2010.07 | 欧洲主权债务 |
+| 2011-美债危机 | 2011.07 - 2011.10 | 美国债务上限 |
+| 2015-A股股灾 | 2015.06 - 2015.08 | A股大跌 |
+| 2018-贸易战 | 2018.01 - 2018.12 | 中美贸易摩擦 |
+| 2020-COVID | 2020.02 - 2020.03 | 疫情暴跌 |
+| 2020-反弹 | 2020.03 - 2020.08 | 疫情后反弹 |
+| 2022-熊市 | 2022.01 - 2022.10 | 通胀加息 |
+| 2023-银行业危机 | 2023.03 | 硅谷银行 |
+
+## 📊 输出指标
+
+- 累计回报 / 年化回报 / 年化波动率
+- Sharpe / Sortino / Calmar
+- 最大回撤 / 最长回撤天数
+- 胜率 / 盈亏比
+- 月度收益热力图
+- 年度收益柱状图
+- 压力测试对比表
+
+## ⚠️ 免责声明
+
+本项目仅供学习和研究使用，不构成任何投资建议。投资有风险，入市需谨慎。

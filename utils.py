@@ -569,40 +569,86 @@ def _download_yfinance(ticker: str, start: str, end: str) -> pd.DataFrame:
     return result
 
 
-def _download_single(ticker: str, start: str, end: str) -> pd.DataFrame:
+def _download_single(ticker: str, start: str, end: str, retries: int = 2) -> pd.DataFrame:
     """
-    根据市场类型选择下载方式。
+    根据市场类型选择下载方式，支持自动重试。
     优先使用 akshare（A股/港股/美股），失败时回退到 yfinance（支持全球市场）。
+    每次重试间隔递增（1秒、2秒），避免限流。
     """
+    import time as _time
+
     market = detect_market(ticker)
     norm = normalize_ticker_for_akshare(ticker)
 
-    # 第一步：尝试 akshare
-    try:
-        if market == "a_share":
-            code = norm.replace("sh", "").replace("sz", "")
-            if code.startswith("000") or code.startswith("399"):
-                df = _download_a_share_index(norm, start, end)
+    for attempt in range(retries + 1):
+        # 第一步：尝试 akshare
+        try:
+            if market == "a_share":
+                code = norm.replace("sh", "").replace("sz", "")
+                if code.startswith("000") or code.startswith("399"):
+                    # 指数数据：尝试多个接口
+                    try:
+                        df = _download_a_share_index(norm, start, end)
+                    except Exception:
+                        import akshare as ak
+                        code = norm.lower().replace("sh", "").replace("sz", "")
+                        df = ak.index_zh_a_hist(
+                            symbol=code, period="daily",
+                            start_date=start.replace("-", ""),
+                            end_date=end.replace("-", ""),
+                        )
+                        if df is not None and not df.empty:
+                            col_map = {}
+                            for c in df.columns:
+                                cl = c.lower()
+                                if "close" in cl or "收盘" in cl:
+                                    col_map[c] = "close"
+                                elif "date" in cl or "日期" in cl:
+                                    col_map[c] = "date"
+                            df = df.rename(columns=col_map)
+                            if "date" in df.columns:
+                                df["date"] = pd.to_datetime(df["date"])
+                                df = df.set_index("date")
+                            df = df[["close"]]
+                else:
+                    df = _download_a_share(norm, start, end)
+            elif market == "hk":
+                df = _download_hk(norm, start, end)
             else:
-                df = _download_a_share(norm, start, end)
-        elif market == "hk":
-            df = _download_hk(norm, start, end)
-        else:
-            df = _download_us(norm, start, end)
+                df = _download_us(norm, start, end)
 
-        if df is not None and not df.empty:
-            return df
-    except Exception as e:
-        print(f"akshare 下载 {ticker} 失败: {e}，尝试 yfinance 回退...")
+            if df is not None and not df.empty:
+                return df
+        except Exception as e:
+            err_msg = str(e)
+            if attempt < retries:
+                _time.sleep(1 + attempt)  # 递增等待
+                continue
+            print(f"akshare 下载 {ticker} 失败（{retries+1}次尝试）: {err_msg}")
 
-    # 第二步：yfinance 回退（支持欧洲指数、港股.HK后缀等）
-    try:
-        df = _download_yfinance(ticker, start, end)
-        if df is not None and not df.empty:
-            print(f"✓ yfinance 成功下载 {ticker}")
-            return df
-    except Exception as e:
-        print(f"yfinance 下载 {ticker} 也失败: {e}")
+        # 第二步：yfinance 回退（支持欧洲指数、港股.HK后缀等）
+        try:
+            # A股需要转换格式给 yfinance
+            yf_ticker = ticker
+            if market == "a_share":
+                code = norm.lower().replace("sh", "").replace("sz", "")
+                if code.startswith("6"):
+                    yf_ticker = f"{code}.SS"
+                else:
+                    yf_ticker = f"{code}.SZ"
+
+            df = _download_yfinance(yf_ticker, start, end)
+            if df is not None and not df.empty:
+                print(f"✓ yfinance 成功下载 {ticker}（akshare 失败后回退）")
+                return df
+        except Exception as e:
+            if attempt < retries:
+                _time.sleep(1 + attempt)
+                continue
+            print(f"yfinance 下载 {ticker} 也失败: {e}")
+
+        if attempt < retries:
+            _time.sleep(1 + attempt)
 
     return pd.DataFrame()
 
@@ -612,30 +658,42 @@ def download_data(
 ) -> tuple:
     """
     批量下载多个 ticker 的收盘价数据。
-    返回 (prices_df, invalid_tickers)
+    返回 (prices_df, invalid_tickers, error_details)
     - prices_df: DataFrame, index=日期, columns=ticker, values=收盘价
     - invalid_tickers: 下载失败的 ticker 列表
+    - error_details: {ticker: error_msg} 详细的错误信息
     """
     import time
 
     prices_dict = {}
     invalid_tickers = []
+    error_details = {}
 
-    for ticker in tickers:
+    for i, ticker in enumerate(tickers):
         try:
             df = _download_single(ticker, start, end)
             if df is None or df.empty:
                 invalid_tickers.append(ticker)
+                error_details[ticker] = "下载成功但返回空数据，请检查 ticker 是否正确"
+                continue
+            if len(df) < 5:
+                invalid_tickers.append(ticker)
+                error_details[ticker] = f"数据不足（仅 {len(df)} 条记录），可能 ticker 有误或日期范围太短"
                 continue
             prices_dict[ticker] = df["close"]
         except Exception as e:
-            print(f"⚠️ 下载 {ticker} 失败: {e}")
+            err_msg = str(e)[:200]  # 截断过长的错误信息
+            print(f"⚠️ 下载 {ticker} 失败: {err_msg}")
             invalid_tickers.append(ticker)
+            error_details[ticker] = err_msg
         time.sleep(0.3)  # 限速，避免触发数据源封禁
 
     if prices_dict:
         prices_df = pd.DataFrame(prices_dict)
         prices_df = prices_df.dropna(how="all")
+        # 对齐所有资产到相同日期范围（取交集）
+        if len(prices_dict) > 1:
+            prices_df = prices_df.dropna()  # 只保留所有资产都有数据的日期
     else:
         prices_df = pd.DataFrame()
 
@@ -646,38 +704,63 @@ def download_data(
 # 组合收益计算（含再平衡）
 # ============================================================
 def calculate_portfolio_returns(
-    prices: pd.DataFrame,
-    weights: List[float],
-    rebalance: str = "无",
+    prices: pd.DataFrame, weights: List[float], rebalance: str = "无"
 ) -> pd.Series:
-    """计算加权组合收益率，支持再平衡。"""
-    returns = prices.pct_change().dropna()
+    """
+    计算组合日收益率（含再平衡）
+    """
+    daily_returns = prices.pct_change().dropna()
     weights_arr = np.array(weights)
 
     if rebalance == "无":
-        portfolio_returns = returns.dot(weights_arr)
+        # 买入持有：计算加权收益
+        port_returns = (daily_returns * weights_arr).sum(axis=1)
+    elif rebalance == "每月":
+        port_returns = _rebalanced_returns(daily_returns, weights_arr, "M")
+    elif rebalance == "每季度":
+        port_returns = _rebalanced_returns(daily_returns, weights_arr, "Q")
     else:
-        freq = "M" if rebalance == "每月" else "Q"
-        rebal_dates = returns.resample(freq).last().index
+        port_returns = (daily_returns * weights_arr).sum(axis=1)
 
-        port_val = pd.Series(1.0, index=returns.index)
-        current_weights = weights_arr.copy()
+    return port_returns
 
-        for i in range(1, len(returns)):
-            date = returns.index[i]
-            daily_ret = returns.iloc[i].values
-            asset_values = current_weights * (1 + daily_ret)
-            total_value = asset_values.sum()
-            if total_value == 0:
-                total_value = 1e-10
-            current_weights = asset_values / total_value
-            port_val.iloc[i] = port_val.iloc[i - 1] * total_value
-            if date in rebal_dates:
-                current_weights = weights_arr.copy()
 
-        portfolio_returns = port_val.pct_change().dropna()
+def _rebalanced_returns(
+    daily_returns: pd.DataFrame, weights: np.ndarray, freq: str
+) -> pd.Series:
+    """按指定频率再平衡"""
+    port_value = 1.0
+    values = []
+    current_weights = weights.copy()
+    rebalance_dates = set(daily_returns.resample(freq).last().index)
 
-    return portfolio_returns
+    for date in daily_returns.index:
+        day_returns = daily_returns.loc[date].values
+        current_weights = current_weights * (1 + day_returns)
+        total = current_weights.sum()
+        if total > 0:
+            current_weights = current_weights / total
+        port_value *= 1 + np.dot(weights, day_returns)
+        values.append(port_value)
+
+        if date in rebalance_dates:
+            current_weights = weights.copy()
+
+    result = pd.Series(values[1:], index=daily_returns.index[1:])
+    return result.pct_change().dropna()
+
+
+def calculate_benchmark_portfolio_returns(
+    prices: pd.DataFrame, weights: List[float]
+) -> pd.Series:
+    """
+    计算基准组合（多资产加权）的日收益率。
+    不支持再平衡，使用买入持有策略。
+    """
+    daily_returns = prices.pct_change().dropna()
+    weights_arr = np.array(weights)
+    port_returns = (daily_returns * weights_arr).sum(axis=1)
+    return port_returns
 
 
 def calculate_benchmark_returns(prices: pd.Series) -> pd.Series:

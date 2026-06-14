@@ -1,8 +1,7 @@
 """
-投资组合回测工具函数模块 v2
-=============================
+投资组合回测工具函数模块
+========================
 - 数据源：AKShare（免费，覆盖 A股/港股/美股/ETF/加密货币）
-- AI 解析：通用 OpenAI 兼容 API
 - 图表：Plotly
 """
 
@@ -38,7 +37,7 @@ STRESS_EVENTS = {
 
 
 # ============================================================
-# 常见资产名称 → Ticker 映射表（用于 AI 识别 fallback）
+# 常见资产名称 → Ticker 映射表（用于速查）
 # ============================================================
 ASSET_NAME_TO_TICKER = {
     # A 股指数
@@ -294,120 +293,6 @@ def download_data(
         prices = prices.ffill().dropna(how="all")
 
     return prices, invalid_tickers
-
-
-# ============================================================
-# AI 自然语言解析资产配置
-# ============================================================
-ASSET_NAME_TO_TICKER = {
-    # A 股指数
-    "沪深300": "sh000300", "上证50": "sh000016", "中证500": "sh000905",
-    "中证1000": "sh000852", "科创50": "sh000688", "创业板": "sz399006",
-    # A 股 ETF
-    "沪深300ETF": "sh510300", "创业板ETF": "sz159915", "科创50ETF": "sh588000",
-    "中证500ETF": "sh510500", "上证50ETF": "sh510050", "纳指ETF": "sh513100",
-    "标普500ETF": "sh513500", "黄金ETF": "sh518880", "国债ETF": "sh511010",
-    "恒生ETF": "sh159920", "恒生科技ETF": "sh513180", "日经ETF": "sh513880",
-    # 港股
-    "腾讯": "00700", "阿里巴巴": "09988", "美团": "03690",
-    "小米": "01810", "比亚迪": "01211", "京东": "09618",
-    # 美股
-    "苹果": "AAPL", "微软": "MSFT", "谷歌": "GOOGL", "亚马逊": "AMZN",
-    "英伟达": "NVDA", "特斯拉": "TSLA", "Meta": "META", "台积电": "TSM",
-    "标普500": "SPY", "纳指100": "QQQ", "道指": "DIA",
-    "黄金": "GLD", "白银": "SLV", "长债": "TLT", "短债": "SHY",
-    "石油": "USO", "天然气": "UNG", "新兴市场": "EEM", "亚太": "VWO",
-}
-
-
-def _build_asset_context() -> str:
-    """构建资产映射上下文供 AI 参考"""
-    lines = []
-    for name, ticker in ASSET_NAME_TO_TICKER.items():
-        lines.append(f"  {name}: {ticker}")
-    return "\n".join(lines)
-
-
-def test_ai_connection(base_url: str, api_key: str, model: str) -> dict:
-    """
-    测试 AI API 连通性。
-    返回: {"success": bool, "message": str, "model": str}
-    """
-    try:
-        from openai import OpenAI
-        client = OpenAI(base_url=base_url, api_key=api_key, timeout=10)
-        response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": "说'连接成功'"}],
-            max_tokens=20,
-        )
-        reply = response.choices[0].message.content.strip()
-        actual_model = response.model if hasattr(response, 'model') else model
-        return {"success": True, "message": f"连接成功！模型: {actual_model}", "model": actual_model}
-    except Exception as e:
-        return {"success": False, "message": f"连接失败: {str(e)}", "model": model}
-
-
-def parse_portfolio_with_ai(
-    user_input: str,
-    base_url: str,
-    api_key: str,
-    model: str,
-) -> Optional[List[Dict]]:
-    """
-    使用 AI 将自然语言解析为资产配置。
-    
-    返回: [{"ticker": "AAPL", "name": "苹果", "weight": 0.25}, ...] 或 None
-    """
-    try:
-        from openai import OpenAI
-
-        client = OpenAI(base_url=base_url, api_key=api_key)
-
-        system_prompt = f"""你是一个专业的投资组合配置助手。用户会用自然语言描述他们想要的投资组合，你需要将其解析为结构化的 JSON 格式。
-
-重要规则：
-1. 必须输出合法的 JSON 数组
-2. 每个元素包含 ticker、name、weight 三个字段
-3. weight 是小数（如 0.25 表示 25%），所有 weight 之和应约等于 1
-4. ticker 必须使用标准代码，参考以下映射表：
-
-{_build_asset_context()}
-
-如果用户提到的资产不在上述映射表中，请使用以下规则推断 ticker：
-- A 股指数：sh000300（沪深300）、sh000016（上证50）等
-- A 股个股：sz000001（平安银行）、sh600519（贵州茅台）等，沪市6开头用sh，深市用sz
-- 港股：5位数字如 00700（腾讯）
-- 美股：直接用代码如 AAPL、SPY
-
-只输出 JSON，不要有其他任何文字。示例输出：
-[{{"ticker": "SPY", "name": "标普500", "weight": 0.6}}, {{"ticker": "TLT", "name": "长债", "weight": 0.4}}]"""
-
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_input},
-            ],
-            temperature=0,
-            max_tokens=2000,
-        )
-
-        content = response.choices[0].message.content.strip()
-        # 提取 JSON 部分（可能被 ```json ``` 包裹）
-        json_match = re.search(r'\[.*\]', content, re.DOTALL)
-        if json_match:
-            result = json.loads(json_match.group())
-            if isinstance(result, list) and len(result) > 0:
-                return result
-
-        return None
-
-    except json.JSONDecodeError:
-        return None
-    except Exception as e:
-        print(f"AI 解析失败: {e}")
-        return None
 
 
 # ============================================================

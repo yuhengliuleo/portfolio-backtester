@@ -1,308 +1,140 @@
 """
-📊 投资组合回测器 v3
-====================
-三大标签页：🤖 AI 对话 · 📊 回测 · ⚙️ 设置
-数据源：AKShare（免费，覆盖全球市场）
-AI 解析：通用 OpenAI 兼容 API
+Streamlit 投资组合回测应用 v3
+===============================
+- 手动输入 Ticker + 权重
+- AKShare 数据源（免费，覆盖 A股/港股/美股/ETF）
+- 压力测试、对冲分析、绩效指标、交互式 Plotly 图表
+- 生成完整 HTML 报告
+- pyfolio-reloaded tearsheet（可选）
 """
 
 import os
 import sys
 import datetime as dt
-import streamlit as st
-import pandas as pd
+import warnings
 
-# 确保能导入本地模块
+import numpy as np
+import pandas as pd
+import streamlit as st
+import plotly.graph_objects as go
+
+warnings.filterwarnings("ignore")
+
+# 确保当前目录在 path 中
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from utils import (
-    download_data, calculate_portfolio_returns, calculate_benchmark_returns,
-    compute_metrics, stress_test, STRESS_EVENTS,
-    plot_equity_curve, plot_drawdown, plot_monthly_heatmap,
-    plot_annual_returns, plot_stress_test,
-    calculate_hedge_portfolio, generate_html_report, parse_portfolio_with_ai,
-    test_ai_connection, ASSET_NAME_TO_TICKER, detect_market,
+    STRESS_EVENTS,
+    ASSET_NAME_TO_TICKER,
+    download_data,
+    calculate_portfolio_returns,
+    calculate_benchmark_returns,
+    compute_metrics,
+    plot_equity_curve,
+    plot_drawdown,
+    plot_monthly_heatmap,
+    plot_annual_returns,
+    stress_test,
+    plot_stress_test,
+    calculate_hedge_portfolio,
+    generate_html_report,
 )
 
 # ============================================================
-# 页面配置
+# Streamlit 页面配置
 # ============================================================
 st.set_page_config(
-    page_title="📊 投资组合回测器",
+    page_title="投资组合回测器",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
-
-
-# ============================================================
-# Session State 初始化
-# ============================================================
-def init_session():
-    """初始化所有 session state 默认值"""
-    defaults = {
-        # AI 配置
-        "ai_base_url": "https://api.openai.com/v1",
-        "ai_api_key": "",
-        "ai_model": "gpt-4o-mini",
-        # 回测配置
-        "tickers_str": "sh000300, sh510500, sh518880, sh511010",
-        "weights_str": "0.4, 0.2, 0.2, 0.2",
-        "start_date": dt.date(2018, 1, 1),
-        "rebalance": "无",
-        "benchmark_input": "sh000300",
-        # 压力测试
-        "selected_stress": ["2020-COVID", "2022-熊市"],
-        # 对冲
-        "hedge_enabled": False,
-        "hedge_ticker": "sh518880",
-        "hedge_weight": 0.1,
-        # AI 聊天记录（持久化）
-        "chat_history": [],
-        # 回测结果
-        "backtest_results": None,
-        # 标签页
-        "active_tab": "📊 回测",
-    }
-    for k, v in defaults.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
-
-
-init_session()
-
 
 # ============================================================
 # 自定义 CSS
 # ============================================================
 st.markdown("""
 <style>
-    /* 隐藏默认 header 和 footer */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    
-    /* 美化标签页 */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
+    .main-header {
+        font-size: 2.2rem;
+        font-weight: 700;
+        color: #1f77b4;
+        text-align: center;
+        padding: 0.5rem 0;
     }
-    .stTabs [data-baseweb="tab"] {
-        padding: 10px 24px;
-        border-radius: 8px 8px 0 0;
-        font-size: 16px;
-        font-weight: 600;
+    .sub-header {
+        text-align: center;
+        color: #666;
+        margin-bottom: 1.5rem;
     }
-    
-    /* 聊天气泡样式 */
-    .chat-user {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 12px 18px;
-        border-radius: 18px 18px 4px 18px;
-        margin: 8px 0;
-        max-width: 80%;
-        float: right;
-        clear: both;
+    div[data-testid="stMetricValue"] {
+        font-size: 1.1rem;
     }
-    .chat-ai {
-        background: #f0f2f6;
-        color: #333;
-        padding: 12px 18px;
-        border-radius: 18px 18px 18px 4px;
-        margin: 8px 0;
-        max-width: 80%;
-        float: left;
-        clear: both;
-    }
-    .chat-container {
-        overflow: hidden;
-        margin-bottom: 16px;
-    }
-    
-    /* 快捷按钮 */
-    .quick-btn {
-        display: inline-block;
-        padding: 6px 14px;
-        margin: 4px;
-        border-radius: 16px;
-        background: #e8eaf6;
-        color: #333;
-        font-size: 13px;
-        cursor: pointer;
-        border: 1px solid #c5cae9;
-    }
-    .quick-btn:hover {
-        background: #c5cae9;
-    }
-    
-    /* 设置页面卡片 */
     .setting-card {
-        background: #fafafa;
-        padding: 20px;
-        border-radius: 12px;
-        border: 1px solid #e0e0e0;
-        margin-bottom: 16px;
+        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        border-radius: 10px;
+        padding: 1.2rem;
+        margin-bottom: 1rem;
+    }
+    .info-box {
+        background: #e8f4fd;
+        border-left: 4px solid #1f77b4;
+        padding: 0.8rem 1rem;
+        border-radius: 0 6px 6px 0;
+        margin: 0.5rem 0;
+    }
+    .ticker-chip {
+        display: inline-block;
+        background: #e3f2fd;
+        color: #1565c0;
+        padding: 4px 12px;
+        border-radius: 16px;
+        margin: 3px 4px;
+        font-size: 0.85rem;
+        font-weight: 500;
     }
 </style>
 """, unsafe_allow_html=True)
 
+# ============================================================
+# Session State 初始化
+# ============================================================
+defaults = {
+    "tickers_str": "sh000300, sh518880, sh511010",
+    "weights_str": "0.5, 0.3, 0.2",
+    "start_date": dt.date(2018, 1, 1),
+    "rebalance": "每月",
+    "benchmark_input": "sh000300",
+    "selected_stress": ["2020-COVID", "2022-熊市"],
+    "hedge_enabled": False,
+    "hedge_ticker": "sh518880",
+    "hedge_weight": 0.1,
+    "backtest_results": None,
+}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 # ============================================================
 # 标题
 # ============================================================
-st.title("📊 投资组合回测器")
-st.caption("数据源：AKShare（A股/港股/美股/ETF） · AI 自然语言配置 · 压力测试 · 对冲分析")
+st.markdown('<div class="main-header">📊 投资组合回测器</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="sub-header">多资产组合回测 · 压力测试 · 对冲分析 · 交互式图表 · 报告导出</div>',
+    unsafe_allow_html=True,
+)
+
+# ============================================================
+# 标签页：回测 / 设置
+# ============================================================
+tab_backtest, tab_settings = st.tabs(["📊 回测", "⚙️ 设置"])
 
 
 # ============================================================
-# 三大标签页
-# ============================================================
-tab_chat, tab_backtest, tab_settings = st.tabs([
-    "🤖 AI 对话", "📊 回测", "⚙️ 设置"
-])
-
-
-# ============================================================
-# Tab 1: 🤖 AI 对话
-# ============================================================
-
-def get_ai_config():
-    """获取当前 AI 配置（优先读取设置页面 widget 的值，兼容用户未点保存的情况）"""
-    base_url = st.session_state.get("set_ai_base_url") or st.session_state.get("ai_base_url", "")
-    api_key = st.session_state.get("set_ai_api_key") or st.session_state.get("ai_api_key", "")
-    model = st.session_state.get("set_ai_model") or st.session_state.get("ai_model", "")
-    return base_url, api_key, model
-
-with tab_chat:
-    # 检查 AI 是否已配置（直接读取设置页面 widget 的 key，无需先点保存）
-    _ai_url, _ai_key, _ai_model = get_ai_config()
-    ai_configured = bool(_ai_url and _ai_key and _ai_model)
-    
-    if not ai_configured:
-        st.info("🔑 尚未配置 AI。请前往 **⚙️ 设置** 标签页配置 AI API，即可使用自然语言描述你的投资组合。")
-        st.markdown("### 💡 不用 AI 也能用！")
-        st.markdown("直接前往 **📊 回测** 标签页，手动输入 Ticker 和权重即可运行回测。")
-        
-        st.markdown("---")
-        st.markdown("### 📖 使用说明")
-        st.markdown("""
-        **配置 AI 后可以：**
-        - 用自然语言描述投资需求，AI 自动解析为资产配置
-        - 示例输入：
-            - `帮我配一个 60% 标普500 + 30% 黄金 + 10% 美债`
-            - `我想要稳健配置，沪深300 40%、中证500 20%、国债ETF 30%、黄金ETF 10%`
-            - `激进成长型：纳指100 50%、英伟达 20%、比特币 15%、黄金 15%`
-        
-        **支持的市场：** A股、港股、美股、ETF
-        **常见资产代码：** SPY（标普500）、QQQ（纳指100）、GLD（黄金）、TLT（长债）、sh000300（沪深300）...
-        """)
-    else:
-        st.success(f"✅ AI 已连接 — 使用模型: **{_ai_model}**")
-        
-        # 显示聊天历史
-        if st.session_state.chat_history:
-            for msg in st.session_state.chat_history:
-                role = msg["role"]
-                content = msg["content"]
-                if role == "user":
-                    st.markdown(f'<div class="chat-container"><div class="chat-user">🧑 {content}</div></div>', unsafe_allow_html=True)
-                else:
-                    # AI 回复可能包含表格数据
-                    if isinstance(content, dict):
-                        # 包含解析结果
-                        st.markdown(f'<div class="chat-container"><div class="chat-ai">🤖 {content.get("message", "")}</div></div>', unsafe_allow_html=True)
-                        if "config" in content:
-                            df = pd.DataFrame(content["config"])
-                            st.dataframe(df, use_container_width=True, hide_index=True)
-                            st.info("👆 已自动填入回测配置。前往 **📊 回测** 标签页运行回测。")
-                    else:
-                        st.markdown(f'<div class="chat-container"><div class="chat-ai">🤖 {content}</div></div>', unsafe_allow_html=True)
-        
-        st.markdown("")
-        
-        # 快捷示例提示
-        st.markdown("**💡 快捷示例：**")
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if st.button("📈 稳健配置", use_container_width=True, key="quick1"):
-                st.session_state["_quick_input"] = "帮我配一个稳健型组合：沪深300 40%、中证500 20%、国债ETF 20%、黄金ETF 20%"
-        with col2:
-            if st.button("🚀 激进成长", use_container_width=True, key="quick2"):
-                st.session_state["_quick_input"] = "激进成长型：纳指100 50%、英伟达 20%、特斯拉 15%、黄金 15%"
-        with col3:
-            if st.button("🌍 全球均衡", use_container_width=True, key="quick3"):
-                st.session_state["_quick_input"] = "全球均衡配置：标普500 30%、沪深300 30%、黄金 20%、长债 20%"
-        
-        # 输入框
-        quick_val = st.session_state.pop("_quick_input", "")
-        user_input = st.chat_input(
-            "描述你想要的投资组合...",
-            key="ai_chat_input",
-        )
-        
-        # 如果点了快捷按钮，自动触发
-        if quick_val and not user_input:
-            user_input = quick_val
-            st.session_state["_auto_send"] = quick_val
-        
-        if user_input:
-            # 添加用户消息到历史
-            st.session_state.chat_history.append({"role": "user", "content": user_input})
-            
-            # 调用 AI
-            with st.spinner("🤖 AI 正在分析..."):
-                _cur_url, _cur_key, _cur_model = get_ai_config()
-                result = parse_portfolio_with_ai(
-                    user_input,
-                    _cur_url,
-                    _cur_key,
-                    _cur_model,
-                )
-            
-            if result:
-                tickers = []
-                weights = []
-                display_data = []
-                for item in result:
-                    t = item.get("ticker", "")
-                    w = item.get("weight", 0)
-                    name = item.get("name", "")
-                    tickers.append(t)
-                    weights.append(w)
-                    display_data.append({"资产": name, "Ticker": t, "权重": f"{w:.0%}"})
-                
-                # 自动填入配置
-                st.session_state.tickers_str = ", ".join(tickers)
-                st.session_state.weights_str = ", ".join([str(w) for w in weights])
-                
-                # 添加 AI 回复到历史
-                st.session_state.chat_history.append({
-                    "role": "ai",
-                    "content": {
-                        "message": f"已识别 {len(tickers)} 个资产，配置已自动填入！",
-                        "config": display_data,
-                    }
-                })
-            else:
-                st.session_state.chat_history.append({
-                    "role": "ai",
-                    "content": "抱歉，我无法解析你的输入。请尝试更清晰地描述，例如：`60% 标普500 + 30% 黄金 + 10% 美债`"
-                })
-            
-            st.rerun()
-        
-        # 清空聊天记录按钮
-        if st.session_state.chat_history:
-            st.markdown("")
-            if st.button("🗑️ 清空聊天记录", key="clear_chat"):
-                st.session_state.chat_history = []
-                st.rerun()
-
-
-# ============================================================
-# Tab 2: 📊 回测
+# Tab 1: 📊 回测
 # ============================================================
 with tab_backtest:
-    # --- 输入区域（紧凑布局） ---
+    # --- 输入区域 ---
     st.subheader("📦 资产配置")
     
     col1, col2 = st.columns([3, 1])
@@ -321,7 +153,7 @@ with tab_backtest:
             key="input_weights",
         )
     
-    # 常用资产速查（可折叠）
+    # 常用资产速查
     with st.expander("🏷️ 常用资产速查", expanded=False):
         quick_assets = {
             "A股指数": ["sh000300 沪深300", "sh000905 中证500", "sh000016 上证50", "sz399006 创业板"],
@@ -366,7 +198,7 @@ with tab_backtest:
         # 进度条
         progress = st.progress(0, text="📥 正在下载数据...")
 
-        # 获取设置（从 session state）
+        # 获取设置
         start_date = st.session_state.start_date
         rebalance = st.session_state.rebalance
         benchmark_input = st.session_state.benchmark_input
@@ -469,7 +301,7 @@ with tab_backtest:
             "benchmark_input": benchmark_input,
         }
     
-    # --- 显示结果（无论是刚运行还是之前运行过的） ---
+    # --- 显示结果 ---
     results = st.session_state.backtest_results
     if results is not None:
         st.markdown("---")
@@ -547,55 +379,14 @@ with tab_backtest:
         1. 在上方输入 Tickers（如 `sh000300, sh518880`）和对应权重（如 `0.7, 0.3`）
         2. 点击 **🚀 运行回测**
         3. 查看权益曲线、回撤、压力测试等结果
-        
-        或者前往 **🤖 AI 对话** 标签页，用自然语言描述你的投资组合！
         """)
 
 
 # ============================================================
-# Tab 3: ⚙️ 设置
+# Tab 2: ⚙️ 设置
 # ============================================================
 with tab_settings:
     st.subheader("⚙️ 系统设置")
-    
-    # --- AI 配置 ---
-    st.markdown('<div class="setting-card">', unsafe_allow_html=True)
-    st.markdown("### 🤖 AI 配置")
-    st.markdown("配置 OpenAI 兼容 API，用于自然语言解析资产配置。")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        ai_base_url = st.text_input(
-            "Base URL",
-            value=st.session_state.ai_base_url,
-            help="OpenAI / DeepSeek / 通义千问等兼容 API 的地址",
-            key="set_ai_base_url",
-        )
-        ai_api_key = st.text_input(
-            "API Key",
-            value=st.session_state.ai_api_key,
-            type="password",
-            help="你的 API Key",
-            key="set_ai_api_key",
-        )
-    with col2:
-        ai_model = st.text_input(
-            "Model",
-            value=st.session_state.ai_model,
-            help="模型名称，如 gpt-4o-mini、deepseek-chat、qwen-turbo 等",
-            key="set_ai_model",
-        )
-        st.markdown("")
-        st.markdown("")
-        if st.button("🔍 测试连接", key="test_ai_btn"):
-            with st.spinner("正在测试 AI 连接..."):
-                result = test_ai_connection(ai_base_url, ai_api_key, ai_model)
-            if result["success"]:
-                st.success(result["message"])
-            else:
-                st.error(result["message"])
-    
-    st.markdown('</div>', unsafe_allow_html=True)
     
     # --- 回测设置 ---
     st.markdown('<div class="setting-card">', unsafe_allow_html=True)
@@ -685,9 +476,6 @@ with tab_settings:
     # --- 保存设置 ---
     st.markdown("")
     if st.button("💾 保存设置", type="primary", use_container_width=True, key="save_settings"):
-        st.session_state.ai_base_url = ai_base_url
-        st.session_state.ai_api_key = ai_api_key
-        st.session_state.ai_model = ai_model
         st.session_state.start_date = start_date
         st.session_state.rebalance = rebalance
         st.session_state.benchmark_input = benchmark_input

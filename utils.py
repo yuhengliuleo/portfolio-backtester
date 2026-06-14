@@ -37,7 +37,7 @@ STRESS_EVENTS = {
 
 
 # ============================================================
-# 资产分类数据库（按市场 → 类型两级分类）
+# 资产分类数据库（按市场 → 类型两级分类，160+ 全球资产）
 # ============================================================
 ASSET_CATALOG = {
     "🇨🇳 A股": {
@@ -47,65 +47,206 @@ ASSET_CATALOG = {
             "中证500": "sh000905",
             "中证1000": "sh000852",
             "科创50": "sh000688",
-            "创业板": "sz399006",
+            "创业板指": "sz399006",
+            "中证全指": "sh000985",
+            "中证红利": "sh000922",
+            "国证芯片": "sz399986",
+            "中证消费": "sh000932",
+            "中证医药": "sh000933",
+            "中证银行": "sh399986",
         },
-        "ETF": {
+        "ETF-宽基": {
             "沪深300ETF": "sh510300",
             "创业板ETF": "sz159915",
             "科创50ETF": "sh588000",
             "中证500ETF": "sh510500",
             "上证50ETF": "sh510050",
+            "中证1000ETF": "sz159845",
+            "A50ETF": "sh159593",
+            "MSCI中国A50ETF": "sh560050",
+            "中证A500ETF": "sh159338",
+        },
+        "ETF-跨境": {
             "纳指ETF": "sh513100",
             "标普500ETF": "sh513500",
-            "黄金ETF": "sh518880",
-            "国债ETF": "sh511010",
             "恒生ETF": "sh159920",
             "恒生科技ETF": "sh513180",
+            "日经ETF": "sh513880",
+            "德国ETF": "sh513030",
+            "法国ETF": "sh513580",
+            "英国ETF": "sh513520",
+            "越南ETF": "sz159822",
+            "印度基金LOF": "sh164824",
+        },
+        "ETF-商品": {
+            "黄金ETF": "sh518880",
+            "白银ETF": "sz161226",
+            "豆粕ETF": "sz159985",
+            "石油ETF": "sz159697",
+            "有色金属ETF": "sh512400",
+            "能源化工ETF": "sh159981",
+        },
+        "ETF-债券": {
+            "国债ETF": "sh511010",
+            "信用债ETF": "sh511220",
+            "十年国债ETF": "sh511260",
+            "可转债ETF": "sh511380",
+        },
+        "ETF-行业": {
+            "券商ETF": "sh512000",
+            "医药ETF": "sh512010",
+            "芯片ETF": "sz159995",
+            "新能源ETF": "sh561610",
+            "军工ETF": "sh512660",
+            "银行ETF": "sh512800",
+            "地产ETF": "sh512200",
+            "消费ETF": "sh159928",
+            "科技ETF": "sh515000",
+            "人工智能ETF": "sh515070",
+            "机器人ETF": "sz562500",
+            "游戏ETF": "sz159869",
+            "碳中和ETF": "sz159790",
+            "传媒ETF": "sh512980",
+            "养殖ETF": "sz159865",
+            "酒ETF": "sh512690",
+            "汽车ETF": "sz159768",
+            "光伏ETF": "sh515790",
+            "稀土ETF": "sh516150",
+            "基建ETF": "sh516950",
+        },
+        "个股": {
+            "贵州茅台": "600519",
+            "宁德时代": "300750",
+            "比亚迪": "002594",
+            "招商银行": "600036",
+            "中国平安": "601318",
+            "隆基绿能": "601012",
+            "五粮液": "000858",
+            "美的集团": "000333",
+            "中信证券": "600030",
+            "恒瑞医药": "600276",
+            "海天味业": "603288",
+            "三一重工": "600031",
         },
     },
     "🇭🇰 港股": {
-        "股票": {
-            "腾讯": "00700",
-            "阿里巴巴": "09988",
-            "美团": "03690",
-            "小米": "01810",
-            "比亚迪": "01211",
-            "京东": "09618",
+        "指数": {
+            "恒生指数": "HSI",
+            "恒生科技指数": "HSTECH",
+            "国企指数": "HSCEI",
+        },
+        "个股": {
+            "腾讯控股": "00700",
+            "阿里巴巴-W": "09988",
+            "美团-W": "03690",
+            "小米集团-W": "01810",
+            "比亚迪H": "01211",
+            "京东集团-SW": "09618",
+            "网易-S": "09999",
+            "快手-W": "01024",
+            "中芯国际": "00981",
+            "中国移动": "00941",
+            "建设银行H": "00939",
+            "工商银行H": "01398",
+            "中国平安H": "02318",
         },
     },
     "🇺🇸 美股": {
         "指数": {
-            "标普500": "SPY",
-            "纳指100": "QQQ",
-            "道指": "DIA",
+            "标普500 (SPY)": "SPY",
+            "纳指100 (QQQ)": "QQQ",
+            "道琼斯 (DIA)": "DIA",
+            "罗素2000 (IWM)": "IWM",
+            "VIX恐慌指数": "VIX",
         },
-        "股票": {
-            "苹果": "AAPL",
-            "微软": "MSFT",
-            "谷歌": "GOOGL",
-            "亚马逊": "AMZN",
-            "英伟达": "NVDA",
-            "特斯拉": "TSLA",
-            "Meta": "META",
-            "台积电": "TSM",
+        "科技巨头": {
+            "苹果 Apple": "AAPL",
+            "微软 Microsoft": "MSFT",
+            "谷歌-A Alphabet": "GOOGL",
+            "亚马逊 Amazon": "AMZN",
+            "英伟达 NVIDIA": "NVDA",
+            "特斯拉 Tesla": "TSLA",
+            "Meta Platforms": "META",
+            "台积电 TSMC": "TSM",
+            "博通 Broadcom": "AVGO",
+            "高通 Qualcomm": "QCOM",
+            "AMD": "AMD",
+            "超微电脑 SMCI": "SMCI",
+            "奈飞 Netflix": "NFLX",
         },
-        "ETF/商品": {
-            "黄金": "GLD",
-            "白银": "SLV",
-            "长债": "TLT",
-            "短债": "SHY",
-            "石油": "USO",
-            "天然气": "UNG",
-            "新兴市场": "EEM",
+        "金融医药": {
+            "伯克希尔B Berkshire": "BRK-B",
+            "摩根大通 JPMorgan": "JPM",
+            "高盛 Goldman Sachs": "GS",
+            "联合健康 UnitedHealth": "UNH",
+            "强生 Johnson&Johnson": "JNJ",
+            "辉瑞 Pfizer": "PFE",
+            "礼来 Eli Lilly": "LLY",
+        },
+        "消费工业": {
+            "沃尔玛 Walmart": "WMT",
+            "可口可乐 Coca-Cola": "KO",
+            "宝洁 P&G": "PG",
+            "麦当劳 McDonald's": "MCD",
+            "耐克 Nike": "NKE",
+            "迪士尼 Disney": "DIS",
+            "波音 Boeing": "BA",
+            "卡特彼勒 Caterpillar": "CAT",
+        },
+        "ETF-宽基": {
+            "标普500ETF-先锋 VOO": "VOO",
+            "标普500ETF-iShares IVV": "IVV",
+            "纳指100-3倍做多 TQQQ": "TQQQ",
+            "纳指100-3倍做空 SQQQ": "SQQQ",
+            "ARK创新ETF ARKK": "ARKK",
+        },
+        "ETF-行业": {
+            "科技ETF (XLK)": "XLK",
+            "金融ETF (XLF)": "XLF",
+            "能源ETF (XLE)": "XLE",
+            "医疗ETF (XLV)": "XLV",
+            "工业ETF (XLI)": "XLI",
+            "消费ETF (XLY)": "XLY",
+            "公用事业ETF (XLU)": "XLU",
+            "房地产ETF (XLRE)": "XLRE",
+            "半导体ETF (SOXX)": "SOXX",
+            "AI机器人ETF (BOTZ)": "BOTZ",
+            "清洁能源ETF (ICLN)": "ICLN",
+        },
+        "ETF-商品": {
+            "黄金ETF (GLD)": "GLD",
+            "白银ETF (SLV)": "SLV",
+            "黄金矿业ETF (GDX)": "GDX",
+            "石油ETF (USO)": "USO",
+            "天然气ETF (UNG)": "UNG",
+            "农产品ETF (DBA)": "DBA",
+            "铜矿ETF (COPX)": "COPX",
+            "宽基商品ETF (DJP)": "DJP",
+        },
+        "ETF-债券": {
+            "长期国债ETF (TLT)": "TLT",
+            "中期国债ETF (IEF)": "IEF",
+            "短期国债ETF (SHY)": "SHY",
+            "投资级债ETF (LQD)": "LQD",
+            "高收益债ETF (HYG)": "HYG",
+            "TIPS通胀保护 (TIP)": "TIP",
+        },
+        "ETF-另类": {
+            "新兴市场ETF (EEM)": "EEM",
+            "新兴市场ETF-先锋 (VWO)": "VWO",
+            "VIX短仓ETF (VIXY)": "VIXY",
+            "杠杆VIX (UVXY)": "UVXY",
+            "前沿市场ETF (FM)": "FM",
         },
     },
     "🇯🇵 日本": {
         "指数": {
-            "日经225": "1330.T",
+            "日经225": "^N225",
             "东证指数": "1306.T",
         },
-        "ETF(国内)": {
-            "日经ETF": "sh513880",
+        "ETF": {
+            "日经ETF(国内)": "sh513880",
+            "MAXIS日经225ETF": "1330.T",
         },
     },
     "🇪🇺 欧洲": {
@@ -113,16 +254,73 @@ ASSET_CATALOG = {
             "德国DAX": "^GDAXI",
             "英国富时100": "^FTSE",
             "法国CAC40": "^FCHI",
+            "欧洲斯托克50": "^STOXX50E",
         },
         "ETF(国内)": {
             "德国ETF": "sh513030",
+            "法国ETF": "sh513580",
+            "英国ETF": "sh513520",
+        },
+    },
+    "🌏 其他市场": {
+        "指数": {
+            "印度Nifty50": "^NSEI",
+            "巴西BOVESPA": "^BVSP",
+            "澳洲ASX200": "^AXJO",
+            "韩国KOSPI": "^KS11",
+            "台湾加权": "^TWII",
+        },
+    },
+    "₿ 加密货币": {
+        "主流币": {
+            "比特币 Bitcoin": "BTC-USD",
+            "以太坊 Ethereum": "ETH-USD",
+            "Solana": "SOL-USD",
+            "BNB": "BNB-USD",
+            "瑞波币 XRP": "XRP-USD",
+            "莱特币 Litecoin": "LTC-USD",
+        },
+    },
+    "💱 外汇": {
+        "主要货币对": {
+            "欧元/美元 EUR/USD": "EURUSD=X",
+            "美元/日元 USD/JPY": "JPY=X",
+            "英镑/美元 GBP/USD": "GBPUSD=X",
+            "美元/人民币 USD/CNY": "CNY=X",
+            "美元指数 DXY": "DX-Y.NYB",
+            "澳元/美元 AUD/USD": "AUDUSD=X",
+        },
+    },
+    "🛢️ 大宗商品": {
+        "期货": {
+            "WTI原油": "CL=F",
+            "布伦特原油": "BZ=F",
+            "黄金期货": "GC=F",
+            "白银期货": "SI=F",
+            "铜期货": "HG=F",
+            "天然气期货": "NG=F",
         },
     },
 }
 
 
 def get_flat_asset_map() -> dict:
-    """将 ASSET_CATALOG 展平为 {中文名: ticker} 映射表（向后兼容）"""
+    """将 ASSET_CATALOG 展平为 {显示标签: ticker} 映射表"""
+    flat = {}
+    for market, types in ASSET_CATALOG.items():
+        for asset_type, assets in types.items():
+            for name, ticker in assets.items():
+                label = f"{market} · {asset_type} | {name} ({ticker})"
+                flat[label] = ticker
+    return flat
+
+
+ASSET_LABEL_TO_TICKER = get_flat_asset_map()
+ASSET_NAME_TO_TICKER = {}  # 向后兼容：展平的 {中文名: ticker}
+
+
+def _build_name_to_ticker():
+    """构建简单的名称到ticker映射（向后兼容）"""
     flat = {}
     for _market, types in ASSET_CATALOG.items():
         for _type, assets in types.items():
@@ -130,13 +328,18 @@ def get_flat_asset_map() -> dict:
     return flat
 
 
-ASSET_NAME_TO_TICKER = get_flat_asset_map()
+ASSET_NAME_TO_TICKER = _build_name_to_ticker()
+
+
+def get_asset_options() -> list:
+    """获取所有资产的显示标签列表（用于 selectbox），格式：'市场 · 类型 | 名称 (代码)'"""
+    return sorted(ASSET_LABEL_TO_TICKER.keys())
 
 
 def search_assets(keyword: str) -> list:
     """
-    在 ASSET_CATALOG 中模糊搜索资产名称，返回匹配列表。
-    每项为 dict: {"market", "type", "name", "ticker"}
+    在 ASSET_CATALOG 中模糊搜索资产名称/代码，返回匹配列表。
+    每项为 dict: {"market", "type", "name", "ticker", "label"}
     """
     results = []
     keyword = keyword.strip().lower()
@@ -145,12 +348,16 @@ def search_assets(keyword: str) -> list:
     for market, types in ASSET_CATALOG.items():
         for asset_type, assets in types.items():
             for name, ticker in assets.items():
-                if keyword in name.lower() or keyword in ticker.lower():
+                if (keyword in name.lower() or
+                    keyword in ticker.lower() or
+                        keyword in market.lower()):
+                    label = f"{market} · {asset_type} | {name} ({ticker})"
                     results.append({
                         "market": market,
                         "type": asset_type,
                         "name": name,
                         "ticker": ticker,
+                        "label": label,
                     })
     return results
 
@@ -398,52 +605,6 @@ def _download_single(ticker: str, start: str, end: str) -> pd.DataFrame:
         print(f"yfinance 下载 {ticker} 也失败: {e}")
 
     return pd.DataFrame()
-
-
-def download_data(
-    tickers: List[str],
-    start: str,
-    end: str,
-    data_dir: str = "data",
-) -> Tuple[pd.DataFrame, List[str]]:
-    """
-    下载多只股票数据，优先读取本地缓存。
-    返回: (prices DataFrame, invalid_tickers list)
-    """
-    prices = pd.DataFrame()
-    invalid_tickers = []
-
-    for ticker in tickers:
-        cpath = _cache_path(ticker, start, end, data_dir)
-
-        # 尝试读缓存
-        if cpath.exists():
-            try:
-                df = pd.read_parquet(cpath)
-                if not df.empty:
-                    prices[ticker] = df["close"]
-                    continue
-            except Exception:
-                pass
-
-        # 下载
-        df = _download_single(ticker, start, end)
-        if df.empty:
-            invalid_tickers.append(ticker)
-            continue
-
-        # 保存缓存
-        df.to_parquet(cpath)
-        prices[ticker] = df["close"]
-
-    if not prices.empty:
-        prices.index = pd.to_datetime(prices.index)
-        if isinstance(prices.columns, pd.MultiIndex):
-            prices.columns = prices.columns.get_level_values(-1)
-        prices = prices.sort_index()
-        prices = prices.ffill().dropna(how="all")
-
-    return prices, invalid_tickers
 
 
 # ============================================================

@@ -27,6 +27,8 @@ from utils import (
     STRESS_EVENTS,
     ASSET_CATALOG,
     ASSET_NAME_TO_TICKER,
+    ASSET_LABEL_TO_TICKER,
+    get_asset_options,
     search_assets,
     get_assets_by_market,
     download_data,
@@ -127,12 +129,15 @@ def get_ticker_from_display(display: str) -> str:
 
 # ============================================================
 # Session State 初始化（资产行）
+# 使用统一标签格式："市场 · 类型 | 名称 (代码)"
 # ============================================================
+ALL_ASSET_OPTIONS = get_asset_options()  # 全局资产选项列表
+
 if "asset_rows" not in st.session_state:
     st.session_state.asset_rows = [
-        {"market": "🇨🇳 A股", "display": "沪深300 (sh000300)", "ticker": "sh000300", "weight": 50},
-        {"market": "🇨🇳 A股", "display": "黄金ETF (sh518880)", "ticker": "sh518880", "weight": 30},
-        {"market": "🇨🇳 A股", "display": "国债ETF (sh511010)", "ticker": "sh511010", "weight": 20},
+        {"label": "🇨🇳 A股 · ETF-宽基 | 沪深300ETF (sh510300)", "ticker": "sh510300", "weight": 50},
+        {"label": "🇨🇳 A股 · ETF-商品 | 黄金ETF (sh518880)", "ticker": "sh518880", "weight": 30},
+        {"label": "🇨🇳 A股 · ETF-债券 | 国债ETF (sh511010)", "ticker": "sh511010", "weight": 20},
     ]
 
 # 其他默认设置
@@ -200,70 +205,47 @@ with tab_backtest:
 
     st.markdown("---")
 
-    # --- 动态资产配置表格 ---
+    # --- 动态资产配置表格（统一 selectbox） ---
     st.subheader("📦 资产配置")
 
-    markets = get_market_names()
-
     # 表头
-    hdr_cols = st.columns([2, 4, 2, 0.5])
+    hdr_cols = st.columns([6, 2, 0.5])
     with hdr_cols[0]:
-        st.markdown("**市场**")
+        st.markdown("**资产标的**（输入关键词搜索）")
     with hdr_cols[1]:
-        st.markdown("**资产标的**")
-    with hdr_cols[2]:
         st.markdown("**权重 (%)**")
-    with hdr_cols[3]:
+    with hdr_cols[2]:
         st.markdown("**操作**")
 
     # 渲染每一行
     rows_to_delete = []
     for i, row in enumerate(st.session_state.asset_rows):
-        c1, c2, c3, c4 = st.columns([2, 4, 2, 0.5])
+        c1, c2, c3 = st.columns([6, 2, 0.5])
 
         with c1:
-            market_idx = markets.index(row["market"]) if row["market"] in markets else 0
-            new_market = st.selectbox(
-                f"市场_{i}",
-                markets,
-                index=market_idx,
-                key=f"market_{i}",
-                label_visibility="collapsed",
-            )
-
-        # 如果市场变了，更新资产选项
-        if new_market != row["market"]:
-            row["market"] = new_market
-            assets_map = get_flat_assets_for_market(new_market)
-            first_display = list(assets_map.keys())[0] if assets_map else ""
-            row["display"] = first_display
-            row["ticker"] = assets_map.get(first_display, "")
-
-        with c2:
-            assets_map = get_flat_assets_for_market(row["market"])
-            asset_options = list(assets_map.keys())
-            # 找到当前 display 的索引
+            # 找到当前 label 在选项列表中的索引
             try:
-                current_idx = asset_options.index(row["display"])
+                current_idx = ALL_ASSET_OPTIONS.index(row["label"])
             except ValueError:
                 # 尝试通过 ticker 匹配
                 current_idx = 0
-                for k, v in assets_map.items():
-                    if v == row.get("ticker", ""):
-                        current_idx = asset_options.index(k)
+                for j, label in enumerate(ALL_ASSET_OPTIONS):
+                    if row.get("ticker", "") in label:
+                        current_idx = j
                         break
 
-            new_display = st.selectbox(
+            new_label = st.selectbox(
                 f"资产_{i}",
-                asset_options,
+                ALL_ASSET_OPTIONS,
                 index=current_idx,
                 key=f"asset_{i}",
                 label_visibility="collapsed",
+                help="输入关键词搜索，格式：市场 · 类型 | 名称 (代码)",
             )
-            row["display"] = new_display
-            row["ticker"] = get_ticker_from_display(new_display)
+            row["label"] = new_label
+            row["ticker"] = ASSET_LABEL_TO_TICKER.get(new_label, row.get("ticker", ""))
 
-        with c3:
+        with c2:
             new_weight = st.number_input(
                 f"权重_{i}",
                 min_value=0.0,
@@ -275,7 +257,7 @@ with tab_backtest:
             )
             row["weight"] = new_weight
 
-        with c4:
+        with c3:
             if st.button("🗑️", key=f"del_{i}", help="删除此资产"):
                 rows_to_delete.append(i)
 
@@ -289,8 +271,7 @@ with tab_backtest:
     with col_add:
         if st.button("➕ 添加资产", width="stretch"):
             st.session_state.asset_rows.append({
-                "market": "🇺🇸 美股",
-                "display": "标普500 (SPY)",
+                "label": "🇺🇸 美股 · 指数 | 标普500 (SPY)",
                 "ticker": "SPY",
                 "weight": 10,
             })

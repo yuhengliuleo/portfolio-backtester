@@ -1,7 +1,7 @@
 """
-Streamlit 投资组合回测应用 v3
+Streamlit 投资组合回测应用 v4
 ===============================
-- 动态资产配置表格（按市场/类型分类）
+- 双模式资产选择：📂 级联浏览（市场→类型→标的）/ 🔍 模糊搜索
 - AKShare 数据源（免费，覆盖 A股/港股/美股/ETF/日本/欧洲）
 - 压力测试、对冲分析、绩效指标、交互式 Plotly 图表
 - 生成完整 HTML 报告
@@ -104,41 +104,41 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================
-# 辅助函数：获取所有市场名称
+# 辅助函数
 # ============================================================
-def get_market_names():
-    return list(ASSET_CATALOG.keys())
+MARKETS = list(ASSET_CATALOG.keys())  # 全局市场列表
 
-def get_assets_for_market(market: str) -> dict:
-    """返回指定市场下所有资产 {type: {name: ticker}}"""
-    return ASSET_CATALOG.get(market, {})
 
-def get_flat_assets_for_market(market: str) -> dict:
-    """返回指定市场下所有资产 {display_name: ticker}，用于下拉框"""
-    result = {}
-    for asset_type, assets in get_assets_for_market(market).items():
-        for name, ticker in assets.items():
-            result[f"{name} ({ticker})"] = ticker
-    return result
+def _find_asset_by_ticker(ticker: str) -> dict:
+    """通过 ticker 反查市场和类型"""
+    for mkt, types in ASSET_CATALOG.items():
+        for typ, assets in types.items():
+            for name, tkr in assets.items():
+                if tkr == ticker:
+                    return {"market": mkt, "type": typ, "name": name}
+    return {"market": MARKETS[0], "type": "", "name": ""}
 
-def get_ticker_from_display(display: str) -> str:
-    """从 '名称 (ticker)' 格式中提取 ticker"""
-    if "(" in display and display.endswith(")"):
-        return display.split("(")[-1].rstrip(")")
-    return display
+
+def _get_uid() -> str:
+    """生成行的唯一 ID，用于稳定的 widget key"""
+    counter = st.session_state.get("_uid_counter", 0)
+    st.session_state["_uid_counter"] = counter + 1
+    return f"r{counter}"
+
 
 # ============================================================
 # Session State 初始化（资产行）
-# 使用统一标签格式："市场 · 类型 | 名称 (代码)"
 # ============================================================
-ALL_ASSET_OPTIONS = get_asset_options()  # 全局资产选项列表
-
 if "asset_rows" not in st.session_state:
     st.session_state.asset_rows = [
-        {"label": "🇨🇳 A股 · ETF-宽基 | 沪深300ETF (sh510300)", "ticker": "sh510300", "weight": 50},
-        {"label": "🇨🇳 A股 · ETF-商品 | 黄金ETF (sh518880)", "ticker": "sh518880", "weight": 30},
-        {"label": "🇨🇳 A股 · ETF-债券 | 国债ETF (sh511010)", "ticker": "sh511010", "weight": 20},
+        {"uid": "init0", "mode": "browse", "market": "🇨🇳 A股", "type": "ETF",
+         "ticker": "sh510300", "weight": 40, "search_text": ""},
+        {"uid": "init1", "mode": "browse", "market": "🇺🇸 美股", "type": "指数",
+         "ticker": "SPY", "weight": 40, "search_text": ""},
+        {"uid": "init2", "mode": "browse", "market": "🇽 黄金", "type": "大宗商品",
+         "ticker": "sh518880", "weight": 20, "search_text": ""},
     ]
+    st.session_state["_uid_counter"] = 10
 
 # 其他默认设置
 defaults = {
@@ -174,91 +174,181 @@ tab_backtest, tab_settings = st.tabs(["📊 回测", "⚙️ 设置"])
 # Tab 1: 📊 回测
 # ============================================================
 with tab_backtest:
-    # --- 搜索框 ---
-    st.subheader("🔍 搜索资产")
-    search_keyword = st.text_input(
-        "输入关键词搜索",
-        placeholder="如：沪深、黄金、AAPL、日经...",
-        key="asset_search_input",
-        label_visibility="collapsed",
-    )
-
-    if search_keyword and search_keyword.strip():
-        results = search_assets(search_keyword)
-        if results:
-            st.markdown(f"找到 **{len(results)}** 个匹配资产：")
-            cols_per_row = 3
-            for i in range(0, len(results), cols_per_row):
-                cols = st.columns(cols_per_row)
-                for j, col in enumerate(cols):
-                    idx = i + j
-                    if idx < len(results):
-                        r = results[idx]
-                        with col:
-                            st.markdown(
-                                f"<span class='ticker-chip'>{r['market']} | {r['type']} | "
-                                f"<b>{r['name']}</b> ({r['ticker']})</span>",
-                                unsafe_allow_html=True,
-                            )
-        else:
-            st.info("未找到匹配资产，请尝试其他关键词。")
-
-    st.markdown("---")
-
-    # --- 动态资产配置表格（统一 selectbox） ---
+    # --- 动态资产配置（双模式：📂 浏览 / 🔍 搜索） ---
     st.subheader("📦 资产配置")
 
-    # 表头
-    hdr_cols = st.columns([6, 2, 0.5])
-    with hdr_cols[0]:
-        st.markdown("**资产标的**（输入关键词搜索）")
-    with hdr_cols[1]:
-        st.markdown("**权重 (%)**")
-    with hdr_cols[2]:
-        st.markdown("**操作**")
+    rows_to_delete: list[int] = []
 
-    # 渲染每一行
-    rows_to_delete = []
     for i, row in enumerate(st.session_state.asset_rows):
-        c1, c2, c3 = st.columns([6, 2, 0.5])
+        # 确保每行有 uid
+        if "uid" not in row:
+            row["uid"] = _get_uid()
+        uid = row["uid"]
 
-        with c1:
-            # 找到当前 label 在选项列表中的索引
-            try:
-                current_idx = ALL_ASSET_OPTIONS.index(row["label"])
-            except ValueError:
-                # 尝试通过 ticker 匹配
-                current_idx = 0
-                for j, label in enumerate(ALL_ASSET_OPTIONS):
-                    if row.get("ticker", "") in label:
-                        current_idx = j
-                        break
+        # 确保新字段存在（向后兼容旧格式）
+        if "mode" not in row:
+            row["mode"] = "browse"
+        if "market" not in row or "type" not in row:
+            info = _find_asset_by_ticker(row.get("ticker", ""))
+            row["market"] = info["market"]
+            row["type"] = info["type"]
+        if "search_text" not in row:
+            row["search_text"] = ""
 
-            new_label = st.selectbox(
-                f"资产_{i}",
-                ALL_ASSET_OPTIONS,
-                index=current_idx,
-                key=f"asset_{i}",
-                label_visibility="collapsed",
-                help="输入关键词搜索，格式：市场 · 类型 | 名称 (代码)",
-            )
-            row["label"] = new_label
-            row["ticker"] = ASSET_LABEL_TO_TICKER.get(new_label, row.get("ticker", ""))
+        # ---- 行布局 ----
+        mode_col, content_col, weight_col, del_col = st.columns(
+            [0.8, 5.7, 1.5, 0.5]
+        )
 
-        with c2:
-            new_weight = st.number_input(
-                f"权重_{i}",
-                min_value=0.0,
-                max_value=100.0,
-                value=float(row["weight"]),
-                step=5.0,
-                key=f"weight_{i}",
+        # ---- 模式切换 ----
+        with mode_col:
+            mode_choice = st.radio(
+                "模式",
+                ["📂 浏览", "🔍 搜索"],
+                index=0 if row["mode"] == "browse" else 1,
+                key=f"mode_{uid}",
+                horizontal=True,
                 label_visibility="collapsed",
             )
-            row["weight"] = new_weight
+            new_mode = "browse" if "浏览" in mode_choice else "search"
 
-        with c3:
-            if st.button("🗑️", key=f"del_{i}", help="删除此资产"):
+            # 模式切换时重置相关内容
+            if new_mode != row["mode"]:
+                row["mode"] = new_mode
+                if new_mode == "browse":
+                    info = _find_asset_by_ticker(row.get("ticker", ""))
+                    row["market"] = info["market"]
+                    row["type"] = info["type"]
+                    row["search_text"] = ""
+                else:
+                    row["search_text"] = ""
+                st.rerun()
+
+        # ---- 资产选择 ----
+        with content_col:
+            if row["mode"] == "browse":
+                # ========== 级联浏览模式：市场 → 类型 → 标的 ==========
+                bc1, bc2, bc3 = st.columns(3)
+
+                # 第1级：市场
+                with bc1:
+                    sel_market = row.get("market", MARKETS[0])
+                    try:
+                        mkt_idx = MARKETS.index(sel_market)
+                    except ValueError:
+                        mkt_idx = 0
+                    sel_market = st.selectbox(
+                        "市场", MARKETS, index=mkt_idx,
+                        key=f"mkt_{uid}", label_visibility="collapsed",
+                    )
+
+                # 市场变化时重置下游
+                prev_mkt = st.session_state.get(f"_pmkt_{uid}", "")
+                if prev_mkt != sel_market:
+                    for _k in [f"typ_{uid}", f"ast_{uid}"]:
+                        if _k in st.session_state:
+                            del st.session_state[_k]
+                    st.session_state[f"_pmkt_{uid}"] = sel_market
+
+                # 第2级：类型
+                types_list = list(ASSET_CATALOG.get(sel_market, {}).keys())
+                with bc2:
+                    sel_type = row.get("type", "")
+                    try:
+                        typ_idx = types_list.index(sel_type)
+                    except (ValueError, IndexError):
+                        typ_idx = 0
+                    if types_list:
+                        sel_type = st.selectbox(
+                            "类型", types_list, index=typ_idx,
+                            key=f"typ_{uid}", label_visibility="collapsed",
+                        )
+                    else:
+                        sel_type = ""
+                        st.caption("无可选类型")
+
+                # 类型变化时重置标的
+                prev_typ = st.session_state.get(f"_ptyp_{uid}", "")
+                if prev_typ != sel_type:
+                    if f"ast_{uid}" in st.session_state:
+                        del st.session_state[f"ast_{uid}"]
+                    st.session_state[f"_ptyp_{uid}"] = sel_type
+
+                # 第3级：标的
+                assets_dict = ASSET_CATALOG.get(sel_market, {}).get(sel_type, {})
+                asset_names = list(assets_dict.keys())
+                with bc3:
+                    if asset_names:
+                        cur_ticker = row.get("ticker", "")
+                        ast_idx = 0
+                        for a_i, nm in enumerate(asset_names):
+                            if assets_dict.get(nm) == cur_ticker:
+                                ast_idx = a_i
+                                break
+                        sel_name = st.selectbox(
+                            "标的", asset_names, index=ast_idx,
+                            key=f"ast_{uid}", label_visibility="collapsed",
+                        )
+                        row["ticker"] = assets_dict.get(sel_name, "")
+                    else:
+                        row["ticker"] = ""
+                        st.caption("无可选标的")
+
+                row["market"] = sel_market
+                row["type"] = sel_type
+
+            else:
+                # ========== 搜索模式：输入关键词 → 从结果中选择 ==========
+                sc1, sc2 = st.columns([2, 3])
+
+                with sc1:
+                    kw = st.text_input(
+                        "搜索",
+                        value=row.get("search_text", ""),
+                        placeholder="代码或名称 (如 AAPL, 黄金, 沪深300)...",
+                        key=f"kw_{uid}",
+                        label_visibility="collapsed",
+                    )
+                    row["search_text"] = kw
+
+                with sc2:
+                    if kw and kw.strip():
+                        results = search_assets(kw.strip())
+                        if results:
+                            opts = [
+                                f"{r['name']} ({r['ticker']}) — {r['market']} · {r['type']}"
+                                for r in results
+                            ]
+                            # 尝试匹配当前 ticker
+                            r_idx = 0
+                            cur_tkr = row.get("ticker", "")
+                            for r_i, r in enumerate(results):
+                                if r["ticker"] == cur_tkr:
+                                    r_idx = r_i
+                                    break
+                            sel = st.selectbox(
+                                "搜索结果", opts, index=r_idx,
+                                key=f"res_{uid}", label_visibility="collapsed",
+                            )
+                            chosen = results[opts.index(sel)]
+                            row["ticker"] = chosen["ticker"]
+                            row["market"] = chosen["market"]
+                            row["type"] = chosen["type"]
+                        else:
+                            st.caption("❌ 未找到匹配资产")
+                    else:
+                        st.caption("💡 输入关键词搜索资产")
+
+        # ---- 权重 ----
+        with weight_col:
+            row["weight"] = st.number_input(
+                f"权重_{uid}", 0.0, 100.0, float(row["weight"]),
+                step=5.0, key=f"w_{uid}", label_visibility="collapsed",
+            )
+
+        # ---- 删除 ----
+        with del_col:
+            if st.button("🗑️", key=f"del_{uid}", help="删除此资产"):
                 rows_to_delete.append(i)
 
     # 删除标记的行
@@ -266,23 +356,34 @@ with tab_backtest:
         st.session_state.asset_rows.pop(idx)
         st.rerun()
 
-    # 添加按钮 + 权重合计
+    # ---- 添加按钮 + 权重合计 ----
     col_add, col_sum = st.columns([1, 3])
     with col_add:
         if st.button("➕ 添加资产", width="stretch"):
+            new_uid = _get_uid()
             st.session_state.asset_rows.append({
-                "label": "🇺🇸 美股 · 指数 | 标普500 (SPY)",
-                "ticker": "SPY",
+                "uid": new_uid,
+                "mode": "browse",
+                "market": MARKETS[0],
+                "type": list(ASSET_CATALOG.get(MARKETS[0], {}).keys())[0] if ASSET_CATALOG.get(MARKETS[0]) else "",
+                "ticker": "",
                 "weight": 10,
+                "search_text": "",
             })
             st.rerun()
 
     with col_sum:
         total_weight = sum(r["weight"] for r in st.session_state.asset_rows)
         if abs(total_weight - 100) < 1:
-            st.markdown(f"<span class='weight-ok'>✅ 权重合计：{total_weight:.0f}%</span>", unsafe_allow_html=True)
+            st.markdown(
+                f"<span class='weight-ok'>✅ 权重合计：{total_weight:.0f}%</span>",
+                unsafe_allow_html=True,
+            )
         elif total_weight == 0:
-            st.markdown(f"<span class='weight-warn'>⚠️ 权重合计：0%</span>", unsafe_allow_html=True)
+            st.markdown(
+                f"<span class='weight-warn'>⚠️ 权重合计：0%</span>",
+                unsafe_allow_html=True,
+            )
         else:
             st.markdown(
                 f"<span class='weight-warn'>⚠️ 权重合计：{total_weight:.0f}%（将自动归一化）</span>",
@@ -297,8 +398,8 @@ with tab_backtest:
     if run_backtest:
         # 从 asset_rows 提取 tickers 和 weights
         asset_rows = st.session_state.asset_rows
-        tickers = [r["ticker"] for r in asset_rows if r["ticker"]]
-        weights = [r["weight"] / 100.0 for r in asset_rows if r["ticker"]]  # 百分比转小数
+        tickers = [r["ticker"] for r in asset_rows if r.get("ticker")]
+        weights = [r["weight"] / 100.0 for r in asset_rows if r.get("ticker")]  # 百分比转小数
 
         if len(tickers) == 0:
             st.error("❌ 请至少添加一个资产")
@@ -326,13 +427,19 @@ with tab_backtest:
         benchmark_input = st.session_state.benchmark_input
 
         end_date_str = dt.date.today().strftime("%Y-%m-%d")
-        start_date_str = start_date.strftime("%Y-%m-%d") if isinstance(start_date, dt.date) else str(start_date)
+        start_date_str = (
+            start_date.strftime("%Y-%m-%d")
+            if isinstance(start_date, dt.date)
+            else str(start_date)
+        )
 
         prices, invalid_tickers = download_data(tickers, start_date_str, end_date_str)
 
         if invalid_tickers:
             st.warning(f"⚠️ 以下 Ticker 下载失败或无数据: {', '.join(invalid_tickers)}")
-            valid_pairs = [(t, w) for t, w in zip(tickers, weights) if t not in invalid_tickers]
+            valid_pairs = [
+                (t, w) for t, w in zip(tickers, weights) if t not in invalid_tickers
+            ]
             if valid_pairs:
                 tickers, weights = zip(*valid_pairs)
                 tickers, weights = list(tickers), list(weights)
@@ -345,8 +452,12 @@ with tab_backtest:
 
         progress.progress(20, text="📥 正在下载基准数据...")
 
-        benchmark_prices, benchmark_invalid = download_data([benchmark_input], start_date_str, end_date_str)
-        has_benchmark = benchmark_input not in benchmark_invalid and not benchmark_prices.empty
+        benchmark_prices, benchmark_invalid = download_data(
+            [benchmark_input], start_date_str, end_date_str
+        )
+        has_benchmark = (
+            benchmark_input not in benchmark_invalid and not benchmark_prices.empty
+        )
         if not has_benchmark:
             st.warning(f"⚠️ 基准指数 {benchmark_input} 下载失败，将不显示基准对比")
 
@@ -399,7 +510,9 @@ with tab_backtest:
         progress.progress(80, text="⚡ 正在进行压力测试...")
 
         selected_stress = st.session_state.selected_stress
-        selected_events = {k: STRESS_EVENTS[k] for k in selected_stress if k in STRESS_EVENTS}
+        selected_events = {
+            k: STRESS_EVENTS[k] for k in selected_stress if k in STRESS_EVENTS
+        }
         stress_df = pd.DataFrame()
         if selected_events:
             stress_df = stress_test(portfolio_returns, benchmark_returns, selected_events)
@@ -435,24 +548,36 @@ with tab_backtest:
 
         # 结果标签页
         rtab1, rtab2, rtab3, rtab4, rtab5 = st.tabs([
-            "📈 权益曲线", "📉 回撤分析", "📊 年度 & 月度收益", "⚡ 压力测试", "📥 下载报告"
+            "📈 权益曲线",
+            "📉 回撤分析",
+            "📊 年度 & 月度收益",
+            "⚡ 压力测试",
+            "📥 下载报告",
         ])
 
         with rtab1:
             st.subheader("权益曲线")
-            fig_eq = plot_equity_curve(results["portfolio_cum"], results["benchmark_cum"], results["hedge_cum"])
+            fig_eq = plot_equity_curve(
+                results["portfolio_cum"],
+                results["benchmark_cum"],
+                results["hedge_cum"],
+            )
             st.plotly_chart(fig_eq, width="stretch")
 
         with rtab2:
             st.subheader("回撤分析")
-            fig_dd = plot_drawdown(results["portfolio_returns"], results["benchmark_returns"])
+            fig_dd = plot_drawdown(
+                results["portfolio_returns"], results["benchmark_returns"]
+            )
             st.plotly_chart(fig_dd, width="stretch")
 
         with rtab3:
             col_a, col_b = st.columns(2)
             with col_a:
                 st.subheader("年度收益")
-                fig_ar = plot_annual_returns(results["portfolio_returns"], results["benchmark_returns"])
+                fig_ar = plot_annual_returns(
+                    results["portfolio_returns"], results["benchmark_returns"]
+                )
                 st.plotly_chart(fig_ar, width="stretch")
             with col_b:
                 st.subheader("月度收益热力图")
@@ -466,7 +591,9 @@ with tab_backtest:
                 fig_stress = plot_stress_test(results["stress_df"])
                 st.plotly_chart(fig_stress, width="stretch")
             else:
-                st.info("未选择压力测试事件或无可用数据。前往 ⚙️ 设置 添加压力测试事件。")
+                st.info(
+                    "未选择压力测试事件或无可用数据。前往 ⚙️ 设置 添加压力测试事件。"
+                )
 
         with rtab5:
             st.subheader("下载完整报告")
@@ -478,9 +605,15 @@ with tab_backtest:
                 "benchmark": results["benchmark_input"],
             }
             report_html = generate_html_report(
-                results["metrics_df"], results["portfolio_cum"], results["benchmark_cum"],
-                results["hedge_cum"], results["portfolio_returns"], results["benchmark_returns"],
-                results["portfolio_returns"], results["stress_df"], config_info,
+                results["metrics_df"],
+                results["portfolio_cum"],
+                results["benchmark_cum"],
+                results["hedge_cum"],
+                results["portfolio_returns"],
+                results["benchmark_returns"],
+                results["portfolio_returns"],
+                results["stress_df"],
+                config_info,
             )
             st.download_button(
                 label="📥 下载 HTML 报告",
@@ -498,8 +631,8 @@ with tab_backtest:
 
         st.markdown("""
         ### 💡 快速开始
-        1. 使用搜索框查找想要的资产（支持中文名、Ticker 搜索）
-        2. 在资产配置表格中选择市场 → 资产标的 → 设置权重
+        1. 在资产配置区，选择 **📂 浏览** 逐级选择（市场 → 类型 → 标的），或切换 **🔍 搜索** 输入关键词
+        2. 设置各项权重
         3. 点击 **🚀 运行回测**
         4. 查看权益曲线、回撤、压力测试等结果
 
@@ -549,7 +682,7 @@ with tab_settings:
             key="set_benchmark",
         )
 
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
     # --- 压力测试 ---
     st.markdown('<div class="setting-card">', unsafe_allow_html=True)
@@ -569,21 +702,25 @@ with tab_settings:
         event_details = []
         for name in selected_stress:
             info = STRESS_EVENTS[name]
-            event_details.append({
-                "事件": name,
-                "时间范围": f"{info['start']} ~ {info['end']}",
-                "描述": info.get("desc", ""),
-            })
+            event_details.append(
+                {
+                    "事件": name,
+                    "时间范围": f"{info['start']} ~ {info['end']}",
+                    "描述": info.get("desc", ""),
+                }
+            )
         st.dataframe(pd.DataFrame(event_details), width="stretch", hide_index=True)
 
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
     # --- 对冲配置 ---
     st.markdown('<div class="setting-card">', unsafe_allow_html=True)
     st.markdown("### 🛡️ 对冲配置（可选）")
     st.markdown("添加对冲资产后，回测结果将额外显示含对冲的组合表现。")
 
-    hedge_enabled = st.checkbox("启用对冲资产", value=st.session_state.hedge_enabled, key="set_hedge_enabled")
+    hedge_enabled = st.checkbox(
+        "启用对冲资产", value=st.session_state.hedge_enabled, key="set_hedge_enabled"
+    )
 
     if hedge_enabled:
         col1, col2 = st.columns(2)
@@ -597,13 +734,14 @@ with tab_settings:
         with col2:
             hedge_weight = st.slider(
                 "对冲比例",
-                0.0, 0.5,
+                0.0,
+                0.5,
                 value=st.session_state.hedge_weight,
                 step=0.05,
                 help="从主组合中分配给对冲资产的比例",
                 key="set_hedge_weight",
             )
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
     # --- 保存设置 ---
     st.markdown("")
@@ -614,8 +752,12 @@ with tab_settings:
         st.session_state.selected_stress = selected_stress
         st.session_state.hedge_enabled = hedge_enabled
         if hedge_enabled:
-            st.session_state.hedge_ticker = st.session_state.get("set_hedge_ticker", "sh518880")
-            st.session_state.hedge_weight = st.session_state.get("set_hedge_weight", 0.1)
+            st.session_state.hedge_ticker = st.session_state.get(
+                "set_hedge_ticker", "sh518880"
+            )
+            st.session_state.hedge_weight = st.session_state.get(
+                "set_hedge_weight", 0.1
+            )
         st.success("✅ 设置已保存！")
 
     # --- 数据管理 ---
@@ -627,7 +769,10 @@ with tab_settings:
         if os.path.exists(data_dir):
             cache_files = os.listdir(data_dir)
             cache_count = len(cache_files)
-            cache_size = sum(os.path.getsize(os.path.join(data_dir, f)) for f in cache_files) / (1024 * 1024)
+            cache_size = (
+                sum(os.path.getsize(os.path.join(data_dir, f)) for f in cache_files)
+                / (1024 * 1024)
+            )
             st.metric("缓存文件数", cache_count)
             st.metric("缓存大小", f"{cache_size:.1f} MB")
         else:
@@ -635,6 +780,7 @@ with tab_settings:
     with col2:
         if st.button("🗑️ 清除所有缓存", key="clear_cache"):
             import shutil
+
             if os.path.exists(data_dir):
                 shutil.rmtree(data_dir)
                 os.makedirs(data_dir)
@@ -648,7 +794,7 @@ with tab_settings:
 st.markdown("---")
 st.markdown(
     '<div style="text-align: center; color: #999; font-size: 12px;">'
-    '📊 投资组合回测器 v3 · 数据源: AKShare · 仅供学习研究，不构成投资建议'
-    '</div>',
+    "📊 投资组合回测器 v4 · 数据源: AKShare · 仅供学习研究，不构成投资建议"
+    "</div>",
     unsafe_allow_html=True,
 )

@@ -26,6 +26,8 @@ env/
 # Data cache (user-specific, large files)
 data/*.csv
 data/*.pkl
+data/*.parquet
+data/
 
 # Streamlit
 .streamlit/secrets.toml

@@ -607,6 +607,41 @@ def _download_single(ticker: str, start: str, end: str) -> pd.DataFrame:
     return pd.DataFrame()
 
 
+def download_data(
+    tickers: list, start: str, end: str
+) -> tuple:
+    """
+    批量下载多个 ticker 的收盘价数据。
+    返回 (prices_df, invalid_tickers)
+    - prices_df: DataFrame, index=日期, columns=ticker, values=收盘价
+    - invalid_tickers: 下载失败的 ticker 列表
+    """
+    import time
+
+    prices_dict = {}
+    invalid_tickers = []
+
+    for ticker in tickers:
+        try:
+            df = _download_single(ticker, start, end)
+            if df is None or df.empty:
+                invalid_tickers.append(ticker)
+                continue
+            prices_dict[ticker] = df["close"]
+        except Exception as e:
+            print(f"⚠️ 下载 {ticker} 失败: {e}")
+            invalid_tickers.append(ticker)
+        time.sleep(0.3)  # 限速，避免触发数据源封禁
+
+    if prices_dict:
+        prices_df = pd.DataFrame(prices_dict)
+        prices_df = prices_df.dropna(how="all")
+    else:
+        prices_df = pd.DataFrame()
+
+    return prices_df, invalid_tickers
+
+
 # ============================================================
 # 组合收益计算（含再平衡）
 # ============================================================

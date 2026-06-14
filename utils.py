@@ -37,27 +37,127 @@ STRESS_EVENTS = {
 
 
 # ============================================================
-# 常见资产名称 → Ticker 映射表（用于速查）
+# 资产分类数据库（按市场 → 类型两级分类）
 # ============================================================
-ASSET_NAME_TO_TICKER = {
-    # A 股指数
-    "沪深300": "sh000300", "上证50": "sh000016", "中证500": "sh000905",
-    "中证1000": "sh000852", "科创50": "sh000688", "创业板": "sz399006",
-    # A 股 ETF
-    "沪深300ETF": "sh510300", "创业板ETF": "sz159915", "科创50ETF": "sh588000",
-    "中证500ETF": "sh510500", "上证50ETF": "sh510050", "纳指ETF": "sh513100",
-    "标普500ETF": "sh513500", "黄金ETF": "sh518880", "国债ETF": "sh511010",
-    "恒生ETF": "sh159920", "恒生科技ETF": "sh513180", "日经ETF": "sh513880",
-    # 港股
-    "腾讯": "00700", "阿里巴巴": "09988", "美团": "03690",
-    "小米": "01810", "比亚迪": "01211", "京东": "09618",
-    # 美股
-    "苹果": "AAPL", "微软": "MSFT", "谷歌": "GOOGL", "亚马逊": "AMZN",
-    "英伟达": "NVDA", "特斯拉": "TSLA", "Meta": "META", "台积电": "TSM",
-    "标普500": "SPY", "纳指100": "QQQ", "道指": "DIA",
-    "黄金": "GLD", "白银": "SLV", "长债": "TLT", "短债": "SHY",
-    "石油": "USO", "天然气": "UNG", "新兴市场": "EEM", "亚太": "VWO",
+ASSET_CATALOG = {
+    "🇨🇳 A股": {
+        "指数": {
+            "沪深300": "sh000300",
+            "上证50": "sh000016",
+            "中证500": "sh000905",
+            "中证1000": "sh000852",
+            "科创50": "sh000688",
+            "创业板": "sz399006",
+        },
+        "ETF": {
+            "沪深300ETF": "sh510300",
+            "创业板ETF": "sz159915",
+            "科创50ETF": "sh588000",
+            "中证500ETF": "sh510500",
+            "上证50ETF": "sh510050",
+            "纳指ETF": "sh513100",
+            "标普500ETF": "sh513500",
+            "黄金ETF": "sh518880",
+            "国债ETF": "sh511010",
+            "恒生ETF": "sh159920",
+            "恒生科技ETF": "sh513180",
+        },
+    },
+    "🇭🇰 港股": {
+        "股票": {
+            "腾讯": "00700",
+            "阿里巴巴": "09988",
+            "美团": "03690",
+            "小米": "01810",
+            "比亚迪": "01211",
+            "京东": "09618",
+        },
+    },
+    "🇺🇸 美股": {
+        "指数": {
+            "标普500": "SPY",
+            "纳指100": "QQQ",
+            "道指": "DIA",
+        },
+        "股票": {
+            "苹果": "AAPL",
+            "微软": "MSFT",
+            "谷歌": "GOOGL",
+            "亚马逊": "AMZN",
+            "英伟达": "NVDA",
+            "特斯拉": "TSLA",
+            "Meta": "META",
+            "台积电": "TSM",
+        },
+        "ETF/商品": {
+            "黄金": "GLD",
+            "白银": "SLV",
+            "长债": "TLT",
+            "短债": "SHY",
+            "石油": "USO",
+            "天然气": "UNG",
+            "新兴市场": "EEM",
+        },
+    },
+    "🇯🇵 日本": {
+        "指数": {
+            "日经225": "1330.T",
+            "东证指数": "1306.T",
+        },
+        "ETF(国内)": {
+            "日经ETF": "sh513880",
+        },
+    },
+    "🇪🇺 欧洲": {
+        "指数": {
+            "德国DAX": "^GDAXI",
+            "英国富时100": "^FTSE",
+            "法国CAC40": "^FCHI",
+        },
+        "ETF(国内)": {
+            "德国ETF": "sh513030",
+        },
+    },
 }
+
+
+def get_flat_asset_map() -> dict:
+    """将 ASSET_CATALOG 展平为 {中文名: ticker} 映射表（向后兼容）"""
+    flat = {}
+    for _market, types in ASSET_CATALOG.items():
+        for _type, assets in types.items():
+            flat.update(assets)
+    return flat
+
+
+ASSET_NAME_TO_TICKER = get_flat_asset_map()
+
+
+def search_assets(keyword: str) -> list:
+    """
+    在 ASSET_CATALOG 中模糊搜索资产名称，返回匹配列表。
+    每项为 dict: {"market", "type", "name", "ticker"}
+    """
+    results = []
+    keyword = keyword.strip().lower()
+    if not keyword:
+        return results
+    for market, types in ASSET_CATALOG.items():
+        for asset_type, assets in types.items():
+            for name, ticker in assets.items():
+                if keyword in name.lower() or keyword in ticker.lower():
+                    results.append({
+                        "market": market,
+                        "type": asset_type,
+                        "name": name,
+                        "ticker": ticker,
+                    })
+    return results
+
+
+def get_assets_by_market(market: str) -> dict:
+    """获取指定市场下的所有资产，返回 {type: {name: ticker}}"""
+    return ASSET_CATALOG.get(market, {})
 
 
 # ============================================================
@@ -227,26 +327,77 @@ def _download_us(ticker: str, start: str, end: str) -> pd.DataFrame:
     return df
 
 
+def _download_yfinance(ticker: str, start: str, end: str) -> pd.DataFrame:
+    """
+    使用 yfinance 下载数据（通用回退方案）
+    支持全球所有市场：美股、欧洲指数、港股、加密货币等
+    """
+    import yfinance as yf
+
+    # 将带 HK 后缀的格式转换为 yfinance 格式
+    yf_ticker = ticker.strip()
+    # 尝试下载
+    df = yf.download(yf_ticker, start=start, end=end, progress=False, auto_adjust=True)
+
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    # 处理 MultiIndex columns（yfinance 有时返回多级列）
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
+    # 找到 Close 列
+    close_col = None
+    for c in df.columns:
+        if c.lower() == "close":
+            close_col = c
+            break
+    if close_col is None:
+        return pd.DataFrame()
+
+    result = df[[close_col]].copy()
+    result.columns = ["close"]
+    result.index = pd.to_datetime(result.index)
+    result.index.name = "date"
+    return result
+
+
 def _download_single(ticker: str, start: str, end: str) -> pd.DataFrame:
-    """根据市场类型选择下载方式"""
+    """
+    根据市场类型选择下载方式。
+    优先使用 akshare（A股/港股/美股），失败时回退到 yfinance（支持全球市场）。
+    """
     market = detect_market(ticker)
     norm = normalize_ticker_for_akshare(ticker)
 
+    # 第一步：尝试 akshare
     try:
         if market == "a_share":
             code = norm.replace("sh", "").replace("sz", "")
-            # 指数代码以 000/399 开头
             if code.startswith("000") or code.startswith("399"):
-                return _download_a_share_index(norm, start, end)
+                df = _download_a_share_index(norm, start, end)
             else:
-                return _download_a_share(norm, start, end)
+                df = _download_a_share(norm, start, end)
         elif market == "hk":
-            return _download_hk(norm, start, end)
+            df = _download_hk(norm, start, end)
         else:
-            return _download_us(norm, start, end)
+            df = _download_us(norm, start, end)
+
+        if df is not None and not df.empty:
+            return df
     except Exception as e:
-        print(f"下载 {ticker} 失败: {e}")
-        return pd.DataFrame()
+        print(f"akshare 下载 {ticker} 失败: {e}，尝试 yfinance 回退...")
+
+    # 第二步：yfinance 回退（支持欧洲指数、港股.HK后缀等）
+    try:
+        df = _download_yfinance(ticker, start, end)
+        if df is not None and not df.empty:
+            print(f"✓ yfinance 成功下载 {ticker}")
+            return df
+    except Exception as e:
+        print(f"yfinance 下载 {ticker} 也失败: {e}")
+
+    return pd.DataFrame()
 
 
 def download_data(

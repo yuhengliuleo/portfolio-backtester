@@ -1,8 +1,8 @@
 """
 Streamlit 投资组合回测应用 v3
 ===============================
-- 手动输入 Ticker + 权重
-- AKShare 数据源（免费，覆盖 A股/港股/美股/ETF）
+- 动态资产配置表格（按市场/类型分类）
+- AKShare 数据源（免费，覆盖 A股/港股/美股/ETF/日本/欧洲）
 - 压力测试、对冲分析、绩效指标、交互式 Plotly 图表
 - 生成完整 HTML 报告
 - pyfolio-reloaded tearsheet（可选）
@@ -25,7 +25,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from utils import (
     STRESS_EVENTS,
+    ASSET_CATALOG,
     ASSET_NAME_TO_TICKER,
+    search_assets,
+    get_assets_by_market,
     download_data,
     calculate_portfolio_returns,
     calculate_benchmark_returns,
@@ -93,15 +96,47 @@ st.markdown("""
         font-size: 0.85rem;
         font-weight: 500;
     }
+    .weight-ok { color: #2e7d32; font-weight: 600; }
+    .weight-warn { color: #e65100; font-weight: 600; }
 </style>
 """, unsafe_allow_html=True)
 
 # ============================================================
-# Session State 初始化
+# 辅助函数：获取所有市场名称
 # ============================================================
+def get_market_names():
+    return list(ASSET_CATALOG.keys())
+
+def get_assets_for_market(market: str) -> dict:
+    """返回指定市场下所有资产 {type: {name: ticker}}"""
+    return ASSET_CATALOG.get(market, {})
+
+def get_flat_assets_for_market(market: str) -> dict:
+    """返回指定市场下所有资产 {display_name: ticker}，用于下拉框"""
+    result = {}
+    for asset_type, assets in get_assets_for_market(market).items():
+        for name, ticker in assets.items():
+            result[f"{name} ({ticker})"] = ticker
+    return result
+
+def get_ticker_from_display(display: str) -> str:
+    """从 '名称 (ticker)' 格式中提取 ticker"""
+    if "(" in display and display.endswith(")"):
+        return display.split("(")[-1].rstrip(")")
+    return display
+
+# ============================================================
+# Session State 初始化（资产行）
+# ============================================================
+if "asset_rows" not in st.session_state:
+    st.session_state.asset_rows = [
+        {"market": "🇨🇳 A股", "display": "沪深300 (sh000300)", "ticker": "sh000300", "weight": 50},
+        {"market": "🇨🇳 A股", "display": "黄金ETF (sh518880)", "ticker": "sh518880", "weight": 30},
+        {"market": "🇨🇳 A股", "display": "国债ETF (sh511010)", "ticker": "sh511010", "weight": 20},
+    ]
+
+# 其他默认设置
 defaults = {
-    "tickers_str": "sh000300, sh518880, sh511010",
-    "weights_str": "0.5, 0.3, 0.2",
     "start_date": dt.date(2018, 1, 1),
     "rebalance": "每月",
     "benchmark_input": "sh000300",
@@ -134,56 +169,158 @@ tab_backtest, tab_settings = st.tabs(["📊 回测", "⚙️ 设置"])
 # Tab 1: 📊 回测
 # ============================================================
 with tab_backtest:
-    # --- 输入区域 ---
-    st.subheader("📦 资产配置")
-    
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        tickers_str = st.text_input(
-            "Tickers（逗号分隔）",
-            value=st.session_state.tickers_str,
-            help="示例：sh000300（沪深300）、SPY（标普500）、00700（腾讯）、AAPL（苹果）",
-            key="input_tickers",
-        )
-    with col2:
-        weights_str = st.text_input(
-            "权重（总和≈1）",
-            value=st.session_state.weights_str,
-            help="与 Tickers 一一对应",
-            key="input_weights",
-        )
-    
-    # 常用资产速查
-    with st.expander("🏷️ 常用资产速查", expanded=False):
-        quick_assets = {
-            "A股指数": ["sh000300 沪深300", "sh000905 中证500", "sh000016 上证50", "sz399006 创业板"],
-            "A股 ETF": ["sh510300 沪深300ETF", "sh518880 黄金ETF", "sh511010 国债ETF", "sh513100 纳指ETF"],
-            "美股": ["SPY 标普500", "QQQ 纳指100", "GLD 黄金", "TLT 长期国债"],
-            "港股": ["00700 腾讯", "09988 阿里", "03690 美团", "01211 比亚迪"],
-        }
-        cols = st.columns(len(quick_assets))
-        for col, (market, assets) in zip(cols, quick_assets.items()):
-            with col:
-                st.markdown(f"**{market}**")
-                for asset in assets:
-                    st.caption(asset)
-    
+    # --- 搜索框 ---
+    st.subheader("🔍 搜索资产")
+    search_keyword = st.text_input(
+        "输入关键词搜索",
+        placeholder="如：沪深、黄金、AAPL、日经...",
+        key="asset_search_input",
+        label_visibility="collapsed",
+    )
+
+    if search_keyword and search_keyword.strip():
+        results = search_assets(search_keyword)
+        if results:
+            st.markdown(f"找到 **{len(results)}** 个匹配资产：")
+            cols_per_row = 3
+            for i in range(0, len(results), cols_per_row):
+                cols = st.columns(cols_per_row)
+                for j, col in enumerate(cols):
+                    idx = i + j
+                    if idx < len(results):
+                        r = results[idx]
+                        with col:
+                            st.markdown(
+                                f"<span class='ticker-chip'>{r['market']} | {r['type']} | "
+                                f"<b>{r['name']}</b> ({r['ticker']})</span>",
+                                unsafe_allow_html=True,
+                            )
+        else:
+            st.info("未找到匹配资产，请尝试其他关键词。")
+
     st.markdown("---")
-    
+
+    # --- 动态资产配置表格 ---
+    st.subheader("📦 资产配置")
+
+    markets = get_market_names()
+
+    # 表头
+    hdr_cols = st.columns([2, 4, 2, 0.5])
+    with hdr_cols[0]:
+        st.markdown("**市场**")
+    with hdr_cols[1]:
+        st.markdown("**资产标的**")
+    with hdr_cols[2]:
+        st.markdown("**权重 (%)**")
+    with hdr_cols[3]:
+        st.markdown("**操作**")
+
+    # 渲染每一行
+    rows_to_delete = []
+    for i, row in enumerate(st.session_state.asset_rows):
+        c1, c2, c3, c4 = st.columns([2, 4, 2, 0.5])
+
+        with c1:
+            market_idx = markets.index(row["market"]) if row["market"] in markets else 0
+            new_market = st.selectbox(
+                f"市场_{i}",
+                markets,
+                index=market_idx,
+                key=f"market_{i}",
+                label_visibility="collapsed",
+            )
+
+        # 如果市场变了，更新资产选项
+        if new_market != row["market"]:
+            row["market"] = new_market
+            assets_map = get_flat_assets_for_market(new_market)
+            first_display = list(assets_map.keys())[0] if assets_map else ""
+            row["display"] = first_display
+            row["ticker"] = assets_map.get(first_display, "")
+
+        with c2:
+            assets_map = get_flat_assets_for_market(row["market"])
+            asset_options = list(assets_map.keys())
+            # 找到当前 display 的索引
+            try:
+                current_idx = asset_options.index(row["display"])
+            except ValueError:
+                # 尝试通过 ticker 匹配
+                current_idx = 0
+                for k, v in assets_map.items():
+                    if v == row.get("ticker", ""):
+                        current_idx = asset_options.index(k)
+                        break
+
+            new_display = st.selectbox(
+                f"资产_{i}",
+                asset_options,
+                index=current_idx,
+                key=f"asset_{i}",
+                label_visibility="collapsed",
+            )
+            row["display"] = new_display
+            row["ticker"] = get_ticker_from_display(new_display)
+
+        with c3:
+            new_weight = st.number_input(
+                f"权重_{i}",
+                min_value=0.0,
+                max_value=100.0,
+                value=float(row["weight"]),
+                step=5.0,
+                key=f"weight_{i}",
+                label_visibility="collapsed",
+            )
+            row["weight"] = new_weight
+
+        with c4:
+            if st.button("🗑️", key=f"del_{i}", help="删除此资产"):
+                rows_to_delete.append(i)
+
+    # 删除标记的行
+    for idx in sorted(rows_to_delete, reverse=True):
+        st.session_state.asset_rows.pop(idx)
+        st.rerun()
+
+    # 添加按钮 + 权重合计
+    col_add, col_sum = st.columns([1, 3])
+    with col_add:
+        if st.button("➕ 添加资产", width="stretch"):
+            st.session_state.asset_rows.append({
+                "market": "🇺🇸 美股",
+                "display": "标普500 (SPY)",
+                "ticker": "SPY",
+                "weight": 10,
+            })
+            st.rerun()
+
+    with col_sum:
+        total_weight = sum(r["weight"] for r in st.session_state.asset_rows)
+        if abs(total_weight - 100) < 1:
+            st.markdown(f"<span class='weight-ok'>✅ 权重合计：{total_weight:.0f}%</span>", unsafe_allow_html=True)
+        elif total_weight == 0:
+            st.markdown(f"<span class='weight-warn'>⚠️ 权重合计：0%</span>", unsafe_allow_html=True)
+        else:
+            st.markdown(
+                f"<span class='weight-warn'>⚠️ 权重合计：{total_weight:.0f}%（将自动归一化）</span>",
+                unsafe_allow_html=True,
+            )
+
+    st.markdown("---")
+
     # --- 运行按钮 ---
-    run_backtest = st.button("🚀 运行回测", type="primary", use_container_width=True, key="run_bt")
-    
+    run_backtest = st.button("🚀 运行回测", type="primary", width="stretch", key="run_bt")
+
     if run_backtest:
-        # 解析输入
-        tickers = [t.strip() for t in tickers_str.split(",") if t.strip()]
-        try:
-            weights = [float(w.strip()) for w in weights_str.split(",") if w.strip()]
-        except ValueError:
-            st.error("❌ 权重格式错误，请输入数字，如：0.4, 0.2, 0.2, 0.2")
-            st.stop()
+        # 从 asset_rows 提取 tickers 和 weights
+        asset_rows = st.session_state.asset_rows
+        tickers = [r["ticker"] for r in asset_rows if r["ticker"]]
+        weights = [r["weight"] / 100.0 for r in asset_rows if r["ticker"]]  # 百分比转小数
 
         if len(tickers) == 0:
-            st.error("❌ 请至少输入一个 Ticker")
+            st.error("❌ 请至少添加一个资产")
             st.stop()
 
         if len(tickers) != len(weights):
@@ -192,8 +329,12 @@ with tab_backtest:
 
         weight_sum = sum(weights)
         if abs(weight_sum - 1.0) > 0.05:
-            st.warning(f"⚠️ 权重总和为 {weight_sum:.3f}，不接近 1。将自动归一化。")
+            st.warning(f"⚠️ 权重总和为 {weight_sum:.3f}，将自动归一化。")
             weights = [w / weight_sum for w in weights]
+
+        # 构建显示用的字符串
+        tickers_str = ", ".join(tickers)
+        weights_str = ", ".join(f"{w:.2f}" for w in weights)
 
         # 进度条
         progress = st.progress(0, text="📥 正在下载数据...")
@@ -300,7 +441,7 @@ with tab_backtest:
             "rebalance": rebalance,
             "benchmark_input": benchmark_input,
         }
-    
+
     # --- 显示结果 ---
     results = st.session_state.backtest_results
     if results is not None:
@@ -309,7 +450,7 @@ with tab_backtest:
 
         # 绩效指标表
         st.subheader("📋 绩效指标")
-        st.dataframe(results["metrics_df"], use_container_width=True, hide_index=True)
+        st.dataframe(results["metrics_df"], width="stretch", hide_index=True)
 
         # 结果标签页
         rtab1, rtab2, rtab3, rtab4, rtab5 = st.tabs([
@@ -319,30 +460,30 @@ with tab_backtest:
         with rtab1:
             st.subheader("权益曲线")
             fig_eq = plot_equity_curve(results["portfolio_cum"], results["benchmark_cum"], results["hedge_cum"])
-            st.plotly_chart(fig_eq, use_container_width=True)
+            st.plotly_chart(fig_eq, width="stretch")
 
         with rtab2:
             st.subheader("回撤分析")
             fig_dd = plot_drawdown(results["portfolio_returns"], results["benchmark_returns"])
-            st.plotly_chart(fig_dd, use_container_width=True)
+            st.plotly_chart(fig_dd, width="stretch")
 
         with rtab3:
             col_a, col_b = st.columns(2)
             with col_a:
                 st.subheader("年度收益")
                 fig_ar = plot_annual_returns(results["portfolio_returns"], results["benchmark_returns"])
-                st.plotly_chart(fig_ar, use_container_width=True)
+                st.plotly_chart(fig_ar, width="stretch")
             with col_b:
                 st.subheader("月度收益热力图")
                 fig_hm = plot_monthly_heatmap(results["portfolio_returns"])
-                st.plotly_chart(fig_hm, use_container_width=True)
+                st.plotly_chart(fig_hm, width="stretch")
 
         with rtab4:
             st.subheader("压力测试")
             if not results["stress_df"].empty:
-                st.dataframe(results["stress_df"], use_container_width=True, hide_index=True)
+                st.dataframe(results["stress_df"], width="stretch", hide_index=True)
                 fig_stress = plot_stress_test(results["stress_df"])
-                st.plotly_chart(fig_stress, use_container_width=True)
+                st.plotly_chart(fig_stress, width="stretch")
             else:
                 st.info("未选择压力测试事件或无可用数据。前往 ⚙️ 设置 添加压力测试事件。")
 
@@ -365,20 +506,30 @@ with tab_backtest:
                 data=report_html,
                 file_name=f"backtest_report_{dt.date.today()}.html",
                 mime="text/html",
-                use_container_width=True,
+                width="stretch",
             )
             st.markdown("报告包含所有图表和指标，可直接在浏览器中打开查看。")
-    
+
     else:
         # 还没有运行过回测
         st.markdown("---")
-        st.info("👆 配置好 Ticker 和权重后，点击 **🚀 运行回测** 开始。")
-        
+        st.info("👆 配置好资产和权重后，点击 **🚀 运行回测** 开始。")
+
         st.markdown("""
         ### 💡 快速开始
-        1. 在上方输入 Tickers（如 `sh000300, sh518880`）和对应权重（如 `0.7, 0.3`）
-        2. 点击 **🚀 运行回测**
-        3. 查看权益曲线、回撤、压力测试等结果
+        1. 使用搜索框查找想要的资产（支持中文名、Ticker 搜索）
+        2. 在资产配置表格中选择市场 → 资产标的 → 设置权重
+        3. 点击 **🚀 运行回测**
+        4. 查看权益曲线、回撤、压力测试等结果
+
+        ### 🌍 支持的市场
+        | 市场 | 说明 |
+        |------|------|
+        | 🇨🇳 A股 | 沪深指数、ETF |
+        | 🇭🇰 港股 | 腾讯、阿里等个股 |
+        | 🇺🇸 美股 | 标普500、纳指、个股、商品ETF |
+        | 🇯🇵 日本 | 日经225、东证指数 |
+        | 🇪🇺 欧洲 | 德国DAX、英国富时100、法国CAC40 |
         """)
 
 
@@ -387,11 +538,11 @@ with tab_backtest:
 # ============================================================
 with tab_settings:
     st.subheader("⚙️ 系统设置")
-    
+
     # --- 回测设置 ---
     st.markdown('<div class="setting-card">', unsafe_allow_html=True)
     st.markdown("### 📅 回测设置")
-    
+
     col1, col2, col3 = st.columns(3)
     with col1:
         start_date = st.date_input(
@@ -413,17 +564,17 @@ with tab_settings:
         benchmark_input = st.text_input(
             "基准指数",
             value=st.session_state.benchmark_input,
-            help="默认沪深300，可改为 SPY、QQQ 等",
+            help="默认沪深300（sh000300），可改为 SPY、QQQ 等",
             key="set_benchmark",
         )
-    
+
     st.markdown('</div>', unsafe_allow_html=True)
-    
+
     # --- 压力测试 ---
     st.markdown('<div class="setting-card">', unsafe_allow_html=True)
     st.markdown("### ⚡ 压力测试事件")
     st.markdown("选择要分析的历史压力事件。")
-    
+
     stress_options = list(STRESS_EVENTS.keys())
     selected_stress = st.multiselect(
         "选择压力测试事件",
@@ -431,7 +582,7 @@ with tab_settings:
         default=st.session_state.selected_stress,
         key="set_stress",
     )
-    
+
     # 显示事件详情
     if selected_stress:
         event_details = []
@@ -442,17 +593,17 @@ with tab_settings:
                 "时间范围": f"{info['start']} ~ {info['end']}",
                 "描述": info.get("desc", ""),
             })
-        st.dataframe(pd.DataFrame(event_details), use_container_width=True, hide_index=True)
-    
+        st.dataframe(pd.DataFrame(event_details), width="stretch", hide_index=True)
+
     st.markdown('</div>', unsafe_allow_html=True)
-    
+
     # --- 对冲配置 ---
     st.markdown('<div class="setting-card">', unsafe_allow_html=True)
     st.markdown("### 🛡️ 对冲配置（可选）")
     st.markdown("添加对冲资产后，回测结果将额外显示含对冲的组合表现。")
-    
+
     hedge_enabled = st.checkbox("启用对冲资产", value=st.session_state.hedge_enabled, key="set_hedge_enabled")
-    
+
     if hedge_enabled:
         col1, col2 = st.columns(2)
         with col1:
@@ -472,10 +623,10 @@ with tab_settings:
                 key="set_hedge_weight",
             )
     st.markdown('</div>', unsafe_allow_html=True)
-    
+
     # --- 保存设置 ---
     st.markdown("")
-    if st.button("💾 保存设置", type="primary", use_container_width=True, key="save_settings"):
+    if st.button("💾 保存设置", type="primary", width="stretch", key="save_settings"):
         st.session_state.start_date = start_date
         st.session_state.rebalance = rebalance
         st.session_state.benchmark_input = benchmark_input
@@ -485,7 +636,7 @@ with tab_settings:
             st.session_state.hedge_ticker = st.session_state.get("set_hedge_ticker", "sh518880")
             st.session_state.hedge_weight = st.session_state.get("set_hedge_weight", 0.1)
         st.success("✅ 设置已保存！")
-    
+
     # --- 数据管理 ---
     st.markdown("---")
     st.markdown("### 🗂️ 数据管理")

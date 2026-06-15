@@ -569,87 +569,92 @@ def _download_yfinance(ticker: str, start: str, end: str) -> pd.DataFrame:
     return result
 
 
-def _download_single(ticker: str, start: str, end: str, retries: int = 2) -> pd.DataFrame:
+def _download_single(ticker: str, start: str, end: str, retries: int = 1) -> pd.DataFrame:
     """
-    根据市场类型选择下载方式，支持自动重试。
-    优先使用 akshare（A股/港股/美股），失败时回退到 yfinance（支持全球市场）。
-    每次重试间隔递增（1秒、2秒），避免限流。
+    多源瀑布式下载：按市场类型选择数据源优先级，自动回退。
+    数据源策略（针对中国大陆网络环境优化）：
+      A股/港股 → akshare（首选，东方财富接口，稳定）→ yfinance（备用）
+      美股/全球 → akshare（首选，覆盖美股/ETF/加密货币等）→ yfinance（备用）
     """
     import time as _time
 
     market = detect_market(ticker)
     norm = normalize_ticker_for_akshare(ticker)
 
-    for attempt in range(retries + 1):
-        # 第一步：尝试 akshare
-        try:
-            if market == "a_share":
-                code = norm.replace("sh", "").replace("sz", "")
-                if code.startswith("000") or code.startswith("399"):
-                    # 指数数据：尝试多个接口
-                    try:
-                        df = _download_a_share_index(norm, start, end)
-                    except Exception:
-                        import akshare as ak
-                        code = norm.lower().replace("sh", "").replace("sz", "")
-                        df = ak.index_zh_a_hist(
-                            symbol=code, period="daily",
-                            start_date=start.replace("-", ""),
-                            end_date=end.replace("-", ""),
-                        )
-                        if df is not None and not df.empty:
-                            col_map = {}
-                            for c in df.columns:
-                                cl = c.lower()
-                                if "close" in cl or "收盘" in cl:
-                                    col_map[c] = "close"
-                                elif "date" in cl or "日期" in cl:
-                                    col_map[c] = "date"
-                            df = df.rename(columns=col_map)
-                            if "date" in df.columns:
-                                df["date"] = pd.to_datetime(df["date"])
-                                df = df.set_index("date")
-                            df = df[["close"]]
-                else:
-                    df = _download_a_share(norm, start, end)
-            elif market == "hk":
-                df = _download_hk(norm, start, end)
-            else:
-                df = _download_us(norm, start, end)
+    # 构建 yfinance 格式的 ticker
+    yf_ticker = ticker
+    if market == "a_share":
+        code = norm.lower().replace("sh", "").replace("sz", "")
+        yf_ticker = f"{code}.SS" if code.startswith("6") else f"{code}.SZ"
+    elif market == "hk":
+        code = ticker.zfill(5)
+        yf_ticker = f"{code}.HK"
 
-            if df is not None and not df.empty:
-                return df
-        except Exception as e:
-            err_msg = str(e)
-            if attempt < retries:
-                _time.sleep(1 + attempt)  # 递增等待
-                continue
-            print(f"akshare 下载 {ticker} 失败（{retries+1}次尝试）: {err_msg}")
+    # akshare 覆盖所有市场（A股/港股/美股/ETF），作为首选
+    source_order = [
+        ("AKShare", lambda: _download_akshare_by_market(market, norm, start, end)),
+        ("yfinance", lambda: _download_yfinance(yf_ticker, start, end)),
+    ]
 
-        # 第二步：yfinance 回退（支持欧洲指数、港股.HK后缀等）
-        try:
-            # A股需要转换格式给 yfinance
-            yf_ticker = ticker
-            if market == "a_share":
-                code = norm.lower().replace("sh", "").replace("sz", "")
-                if code.startswith("6"):
-                    yf_ticker = f"{code}.SS"
-                else:
-                    yf_ticker = f"{code}.SZ"
+    # 瀑布式尝试
+    for source_name, download_fn in source_order:
+        for attempt in range(retries + 1):
+            try:
+                df = download_fn()
+                if df is not None and not df.empty:
+                    print(f"✓ {source_name} 成功下载 {ticker}")
+                    return df
+            except Exception as e:
+                err_msg = str(e)[:100]
+                if attempt < retries:
+                    _time.sleep(1 + attempt)
+                    continue
+                # 最后一次尝试失败，打印日志并继续到下一个数据源
+                print(f"⚠ {source_name} 下载 {ticker} 失败: {err_msg}")
+            _time.sleep(0.5)  # 限速保护
 
-            df = _download_yfinance(yf_ticker, start, end)
-            if df is not None and not df.empty:
-                print(f"✓ yfinance 成功下载 {ticker}（akshare 失败后回退）")
-                return df
-        except Exception as e:
-            if attempt < retries:
-                _time.sleep(1 + attempt)
-                continue
-            print(f"yfinance 下载 {ticker} 也失败: {e}")
+    # 所有数据源都失败
+    print(f"✗ 所有数据源均无法下载 {ticker}，请检查 ticker 是否正确")
+    return pd.DataFrame()
 
-        if attempt < retries:
-            _time.sleep(1 + attempt)
 
+def _download_akshare_by_market(market: str, norm: str, start: str, end: str) -> pd.DataFrame:
+    """统一的 akshare 下载入口，按市场类型分发到对应的下载函数"""
+    if market == "a_share":
+        code = norm.lower().replace("sh", "").replace("sz", "")
+        if code.startswith("000") or code.startswith("399"):
+            # 指数数据：尝试多个接口
+            try:
+                df = _download_a_share_index(norm, start, end)
+            except Exception:
+                import akshare as ak
+                df = ak.index_zh_a_hist(
+                    symbol=code, period="daily",
+                    start_date=start.replace("-", ""),
+                    end_date=end.replace("-", ""),
+                )
+                if df is not None and not df.empty:
+                    col_map = {}
+                    for c in df.columns:
+                        cl = c.lower()
+                        if "close" in cl or "收盘" in cl:
+                            col_map[c] = "close"
+                        elif "date" in cl or "日期" in cl:
+                            col_map[c] = "date"
+                    df = df.rename(columns=col_map)
+                    if "date" in df.columns:
+                        df["date"] = pd.to_datetime(df["date"])
+                        df = df.set_index("date")
+                    df = df[["close"]]
+        else:
+            df = _download_a_share(norm, start, end)
+    elif market == "hk":
+        df = _download_hk(norm, start, end)
+    else:
+        df = _download_us(norm, start, end)
+
+    if df is not None and not df.empty:
+        return df
     return pd.DataFrame()
 
 

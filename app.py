@@ -442,8 +442,19 @@ with tab_main:
                 bench_tickers, bench_weights = list(bench_tickers), list(bench_weights)
                 bw = sum(bench_weights)
                 bench_weights = [w / bw for w in bench_weights]
-                bench_prices = bench_prices[bench_tickers]
-                has_benchmark = True
+                # 只选择实际存在的列，避免 KeyError
+                available_cols = [t for t in bench_tickers if t in bench_prices.columns]
+                if available_cols:
+                    bench_prices = bench_prices[available_cols]
+                    # 如果有列缺失，重新调整权重
+                    if len(available_cols) < len(bench_tickers):
+                        bench_weights = [bench_weights[bench_tickers.index(t)] for t in available_cols]
+                        bench_tickers = available_cols
+                        bw = sum(bench_weights)
+                        bench_weights = [w / bw for w in bench_weights]
+                    has_benchmark = True
+                else:
+                    st.warning("⚠️ 基准资产下载数据为空，将不显示基准对比")
             else:
                 st.warning("⚠️ 所有基准资产下载失败，将不显示基准对比")
 
@@ -453,28 +464,39 @@ with tab_main:
         portfolio_returns = calculate_portfolio_returns(prices, weights, rebalance)
         portfolio_cum = (1 + portfolio_returns).cumprod()
 
-        # 计算基准收益（支持多资产加权）
+        # 计算基准收益（支持多资产加权，带 try/except 兜底）
         benchmark_returns = None
         benchmark_cum = None
         if has_benchmark:
-            if len(bench_tickers) == 1:
-                benchmark_returns = calculate_benchmark_returns(bench_prices.iloc[:, 0])
-            else:
-                benchmark_returns = calculate_benchmark_portfolio_returns(bench_prices, bench_weights)
-            benchmark_cum = (1 + benchmark_returns).cumprod()
-            common_idx = portfolio_cum.index.intersection(benchmark_cum.index)
-            portfolio_cum = portfolio_cum.loc[common_idx]
-            benchmark_cum = benchmark_cum.loc[common_idx]
-            portfolio_returns = portfolio_returns.loc[common_idx]
-            benchmark_returns = benchmark_returns.loc[common_idx]
+            try:
+                if len(bench_tickers) == 1:
+                    benchmark_returns = calculate_benchmark_returns(bench_prices.iloc[:, 0])
+                else:
+                    benchmark_returns = calculate_benchmark_portfolio_returns(bench_prices, bench_weights)
+                if benchmark_returns is not None and not benchmark_returns.empty:
+                    benchmark_cum = (1 + benchmark_returns).cumprod()
+                    common_idx = portfolio_cum.index.intersection(benchmark_cum.index)
+                    portfolio_cum = portfolio_cum.loc[common_idx]
+                    benchmark_cum = benchmark_cum.loc[common_idx]
+                    portfolio_returns = portfolio_returns.loc[common_idx]
+                    benchmark_returns = benchmark_returns.loc[common_idx]
+                else:
+                    benchmark_returns = None
+                    has_benchmark = False
+            except Exception as e:
+                st.warning(f"基准收益计算失败，将不显示基准对比: {e}")
+                benchmark_returns = None
+                has_benchmark = False
 
         progress.progress(60, text="📊 正在计算绩效指标...")
 
         # 计算指标
-        port_metrics = compute_metrics(portfolio_returns, "组合")
+        port_metrics = compute_metrics(portfolio_returns)
+        port_metrics["类型"] = "组合"
         metrics_list = [port_metrics]
         if has_benchmark and benchmark_returns is not None:
-            bench_metrics = compute_metrics(benchmark_returns, "基准")
+            bench_metrics = compute_metrics(benchmark_returns)
+            bench_metrics["类型"] = "基准"
             metrics_list.append(bench_metrics)
         metrics_df = pd.DataFrame(metrics_list)
 
@@ -495,7 +517,8 @@ with tab_main:
                     hedge_cum = (1 + hedge_returns).cumprod()
                     common_idx = portfolio_cum.index.intersection(hedge_cum.index)
                     hedge_cum = hedge_cum.loc[common_idx]
-                    hedge_metrics = compute_metrics(hedge_returns.loc[common_idx], "含对冲")
+                    hedge_metrics = compute_metrics(hedge_returns.loc[common_idx])
+                    hedge_metrics["类型"] = "含对冲"
                     metrics_list.append(hedge_metrics)
                     metrics_df = pd.DataFrame(metrics_list)
 

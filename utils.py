@@ -314,6 +314,19 @@ ASSET_CATALOG = {
             "美元/加元": "CAD=X",
         },
     },
+    "\U0001f4b8 利率": {
+        "美国国债收益率": {
+            "10年期美债收益率": "DGS10",
+            "2年期美债收益率": "DGS2",
+            "30年期美债收益率": "DGS30",
+            "10Y-2Y利差": "T10Y2Y",
+        },
+        "中国国债收益率": {
+            "10年期中债收益率": "CN10Y",
+            "5年期中债收益率": "CN5Y",
+            "1年期中债收益率": "CN1Y",
+        },
+    },
 }
 
 
@@ -377,6 +390,10 @@ _SINA_GLOBAL_INDEX_MAP = {
 }
 
 
+# 利率类 ticker 集合
+_BOND_YIELD_TICKERS = {"DGS10", "DGS2", "DGS30", "T10Y2Y", "CN10Y", "CN5Y", "CN1Y"}
+
+
 def detect_market(ticker: str) -> str:
     """
     检测 ticker 所属类型，返回：
@@ -388,8 +405,13 @@ def detect_market(ticker: str) -> str:
     - "futures"   : 期货（GC=F、CL=F 等）
     - "crypto"    : 加密货币（BTC-USD 等）
     - "forex"     : 外汇（EURUSD=X 等）
+    - "bond_yield": 国债收益率（DGS10、CN10Y 等）
     """
     t = ticker.strip().upper()
+
+    # 利率类 ticker 优先检测
+    if t in _BOND_YIELD_TICKERS:
+        return "bond_yield"
 
     # 处理 yfinance 风格的 A 股后缀（.SS = 上海, .SZ = 深圳, .SH = 上海）
     if re.match(r'^\d{6}\.(SS|SZ|SH)$', t):
@@ -1023,6 +1045,150 @@ def _download_akshare_by_market(market: str, norm: str, start: str, end: str) ->
 # ============================================================
 # 数据源 2：yfinance（通用回退）
 # ============================================================
+def _download_bond_yield(ticker: str, start: str, end: str) -> pd.DataFrame:
+    """
+    下载国债收益率数据
+    - DGS10/DGS2/DGS30/T10Y2Y → 美国国债（FRED via AKShare bond_zh_us_rate）
+    - CN10Y/CN5Y/CN1Y → 中国国债（AKShare bond_china_yield）
+    
+    Returns:
+        DataFrame with 'close' column = 收益率百分比值（如 4.25 = 4.25%）
+    """
+    t = ticker.strip().upper()
+    start_dt = pd.Timestamp(start)
+    end_dt = pd.Timestamp(end)
+
+    # ===== 美国国债收益率 =====
+    if t in ("DGS10", "DGS2", "DGS30", "T10Y2Y"):
+        # 方法1: AKShare bond_zh_us_rate（东方财富美国国债收益率）
+        try:
+            import akshare as ak
+            df = ak.bond_zh_us_rate(start_date=start.replace("-", ""))
+            if df is not None and not df.empty:
+                # 列名精确匹配映射（列名格式：美国国债收益率10年、中国国债收益率2年 等）
+                _BOND_COL_MAP = {
+                    "DGS10":  "美国国债收益率10年",
+                    "DGS2":   "美国国债收益率2年",
+                    "DGS30":  "美国国债收益率30年",
+                    "CN10Y":  "中国国债收益率10年",
+                    "CN5Y":   "中国国债收益率5年",
+                    "CN1Y":   "中国国债收益率2年",  # 最近的短期
+                }
+                col_map = {}
+                for c in df.columns:
+                    cl = c.lower()
+                    if "日期" in c or "date" in cl:
+                        col_map[c] = "date"
+                
+                if t in _BOND_COL_MAP:
+                    target_col = _BOND_COL_MAP[t]
+                    for c in df.columns:
+                        if c == target_col:
+                            col_map[c] = "close"
+                            break
+                    # 回退：模糊匹配
+                    if "close" not in col_map.values():
+                        for c in df.columns:
+                            if _BOND_COL_MAP[t] in c or (t.startswith("DGS") and "美国" in c and "收益率" in c):
+                                col_map[c] = "close"
+                                break
+
+                if "date" in col_map:
+                    df = df.rename(columns=col_map)
+                    df["date"] = pd.to_datetime(df["date"])
+                    df = df.set_index("date")
+                else:
+                    # 第一列是日期
+                    df.iloc[:, 0] = pd.to_datetime(df.iloc[:, 0])
+                    df = df.set_index(df.columns[0])
+                    df.index.name = "date"
+
+                if t == "T10Y2Y":
+                    # 利差 = 10Y - 2Y
+                    us10_col = us2_col = None
+                    for c in df.columns:
+                        if "美国" in c and "10" in c:
+                            us10_col = c
+                        elif "美国" in c and "2" in c:
+                            us2_col = c
+                    if us10_col and us2_col:
+                        df["close"] = pd.to_numeric(df[us10_col], errors="coerce") - \
+                                      pd.to_numeric(df[us2_col], errors="coerce")
+                    else:
+                        return pd.DataFrame()
+                elif "close" not in df.columns:
+                    return pd.DataFrame()
+
+                result = df[["close"]].copy()
+                result["close"] = pd.to_numeric(result["close"], errors="coerce")
+                result = result.dropna()
+                result = result.loc[start_dt:end_dt]
+                if not result.empty:
+                    print(f"  ✓ {ticker}: AKShare bond_zh_us_rate 成功, {len(result)} 条")
+                    return result
+        except Exception as e:
+            print(f"  AKShare bond_zh_us_rate 失败 {ticker}: {e}")
+
+        # 方法2: yfinance FRED 代理 ETF（TLT 近似 10Y, SHY 近似 2Y）
+        yf_proxy = {"DGS10": "TLT", "DGS2": "SHY", "DGS30": "TLT", "T10Y2Y": None}
+        proxy = yf_proxy.get(t)
+        if proxy:
+            try:
+                df = _download_yfinance(proxy, start, end)
+                if not df.empty:
+                    print(f"  ✓ {ticker}: yfinance proxy ({proxy}) 成功, {len(df)} 条")
+                    return df
+            except Exception:
+                pass
+
+    # ===== 中国国债收益率 =====
+    elif t in ("CN10Y", "CN5Y", "CN1Y"):
+        # 方法1: AKShare bond_zh_us_rate（同时包含中美两国国债收益率）
+        try:
+            import akshare as ak
+            df = ak.bond_zh_us_rate(start_date=start.replace("-", ""))
+            if df is not None and not df.empty:
+                _BOND_COL_MAP = {
+                    "CN10Y":  "中国国债收益率10年",
+                    "CN5Y":   "中国国债收益率5年",
+                    "CN1Y":   "中国国债收益率2年",
+                }
+                col_map = {}
+                for c in df.columns:
+                    cl = c.lower()
+                    if "日期" in c or "date" in cl:
+                        col_map[c] = "date"
+                
+                target_col = _BOND_COL_MAP.get(t)
+                if target_col:
+                    for c in df.columns:
+                        if c == target_col:
+                            col_map[c] = "close"
+                            break
+
+                if "date" in col_map:
+                    df = df.rename(columns=col_map)
+                    df["date"] = pd.to_datetime(df["date"])
+                    df = df.set_index("date")
+                else:
+                    df.iloc[:, 0] = pd.to_datetime(df.iloc[:, 0])
+                    df = df.set_index(df.columns[0])
+                    df.index.name = "date"
+
+                if "close" in df.columns:
+                    result = df[["close"]].copy()
+                    result["close"] = pd.to_numeric(result["close"], errors="coerce")
+                    result = result.dropna()
+                    result = result.loc[start_dt:end_dt]
+                    if not result.empty:
+                        print(f"  ✓ {ticker}: AKShare bond_zh_us_rate 成功, {len(result)} 条")
+                        return result
+        except Exception as e:
+            print(f"  AKShare bond_zh_us_rate 失败 {ticker}: {e}")
+
+    return pd.DataFrame()
+
+
 def _download_yfinance(ticker: str, start: str, end: str) -> pd.DataFrame:
     """使用 yfinance 下载数据（通用回退方案）
     
@@ -1171,6 +1337,16 @@ def download_data(
             except Exception as e:
                 print(f"  ✗ {display}: 全球指数专用下载失败 - {e}")
 
+        # 第0层B：国债收益率专用下载器
+        if df.empty and market == "bond_yield":
+            sources_tried.append("国债收益率专用")
+            try:
+                df = _download_bond_yield(ticker, start, end)
+                if not df.empty:
+                    print(f"  ✓ {display}: 国债收益率专用下载成功, {len(df)} 条")
+            except Exception as e:
+                print(f"  ✗ {display}: 国债收益率专用下载失败 - {e}")
+
         # 第0.5层：新浪财经（不走 eastmoney，国内最可靠）
         if df.empty and market in ("a_share", "us"):
             sources_tried.append("新浪财经")
@@ -1220,6 +1396,8 @@ def download_data(
                     pass  # yfinance 直接支持 ^GSPC 等
                 elif market == "hk":
                     yf_ticker = f"{ticker.zfill(5)}.HK"
+                elif market == "hk_index":
+                    yf_ticker = f"^{ticker}"  # HSI → ^HSI, HSTECH → ^HSTECH
                 df = _download_yfinance(yf_ticker, start, end)
                 if not df.empty:
                     print(f"  ✓ {display}: yfinance成功, {len(df)} 条")

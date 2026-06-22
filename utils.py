@@ -489,14 +489,24 @@ def normalize_display_name(ticker: str) -> str:
 # 数据源 0：新浪财经（不依赖 eastmoney，最可靠）
 # ============================================================
 
-def _sina_kline_a_share(ticker: str) -> pd.DataFrame:
+def _sina_kline_a_share(ticker: str, start: str = None) -> pd.DataFrame:
     """
     新浪财经 A 股/指数历史 K 线（不走 eastmoney）
-    免费、无需 API Key、每天最多 1500 条
+    免费、无需 API Key、支持最多约 10000 条
     """
+    # 动态计算 datalen：从 start 到今的交易日数 + 余量
+    datalen = 8000
+    if start:
+        try:
+            days = (pd.Timestamp.now() - pd.Timestamp(start)).days
+            datalen = max(int(days * 260 / 365) + 200, 3000)
+            datalen = min(datalen, 10000)
+        except Exception:
+            datalen = 8000
+
     norm = normalize_ticker_for_akshare(ticker)  # e.g. "sh000300"
     url = "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData"
-    params = {"symbol": norm, "scale": "240", "ma": "no", "datalen": "1500"}
+    params = {"symbol": norm, "scale": "240", "ma": "no", "datalen": str(datalen)}
     try:
         resp = requests.get(url, params=params, timeout=15)
         if resp.status_code != 200 or not resp.text.strip():
@@ -554,7 +564,7 @@ def _download_sina(market: str, ticker: str, start: str, end: str) -> pd.DataFra
     end_dt = pd.Timestamp(end)
 
     if market == "a_share":
-        df = _sina_kline_a_share(ticker)
+        df = _sina_kline_a_share(ticker, start=start)
     elif market == "us":
         df = _sina_kline_us(ticker)
     else:
@@ -1353,7 +1363,18 @@ def download_data(
             try:
                 df = _download_sina(market, ticker, start, end)
                 if not df.empty:
-                    print(f"  ✓ {display}: 新浪财经成功, {len(df)} 条")
+                    # 数据完整性检查：如果新浪返回的数据起始日期晚于用户请求的 start，说明数据不完整
+                    try:
+                        data_start = df.index.min()
+                        requested_start = pd.Timestamp(start) - pd.Timedelta(days=30)  # 允许30天误差
+                        if data_start > requested_start:
+                            print(f"  ⚠ {display}: 新浪财经数据不完整（从 {data_start.strftime('%Y-%m-%d')} 开始，"
+                                  f"请求 {start}），继续尝试其他源")
+                            df = pd.DataFrame()
+                        else:
+                            print(f"  ✓ {display}: 新浪财经成功, {len(df)} 条")
+                    except Exception:
+                        print(f"  ✓ {display}: 新浪财经成功, {len(df)} 条")
             except Exception as e:
                 print(f"  ✗ {display}: 新浪财经失败 - {e}")
 
